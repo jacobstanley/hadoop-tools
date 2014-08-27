@@ -1,11 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# OPTIONS_GHC -w #-}
 
 module Main (main) where
 
-import           Codec.Compression.Snappy (decompress)
-import           Control.Applicative ((<$>), (<*>))
-import           Control.Monad (when, replicateM)
+import qualified Codec.Compression.Snappy as Snappy
+import           Control.Applicative ((<$>), (<*>), many)
+import           Control.Monad (when, unless, replicateM)
 import           Control.Monad.Loops (unfoldM)
 import           Data.Binary.Get
 import           Data.Bits ((.|.), xor, shiftL)
@@ -14,7 +15,9 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy as L
 import           Data.Int
-import           Data.Monoid ((<>))
+import           Data.List (sort)
+import           Data.Maybe (catMaybes)
+import           Data.Monoid (Monoid, (<>), mempty, mconcat)
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -34,12 +37,35 @@ main = do
 hdshow :: FilePath -> IO ()
 hdshow path = do
     bs <- unsafeMMapFile path
-    mapM_ T.putStrLn (runGet getSequenceFile (L.fromStrict bs))
+    let xs = runGet getSequenceFile (L.fromStrict bs)
+    mapM_ go xs
+  where
+    go (k, v) = T.putStrLn (k <> "|" <> T.pack sz)
+      where
+        sz = show (L.length v) <> " bytes"
+        v' = show (L.take 50 v)
 
 ------------------------------------------------------------------------
 
-getSequenceFile :: Get [Text]
+data Header = Header {
+    keyType   :: Text
+  , valueType :: Text
+  , sync      :: MD5
+  } deriving (Show)
+
+------------------------------------------------------------------------
+
+getSequenceFile :: Get [(Text, L.ByteString)]
 getSequenceFile = do
+    hdr <- getHeader
+
+    let getKey = getText
+        getVal = getRemainingLazyByteString
+
+    concat <$> untilEmpty (getRecordBlock (sync hdr) getKey getVal)
+
+getHeader :: Get Header
+getHeader = do
     magic <- getByteString 3
     when (magic /= "SEQ")
          (fail "not a sequence file")
@@ -48,27 +74,25 @@ getSequenceFile = do
     when (version /= 6)
          (fail $ "unknown version: " ++ show version)
 
-    keyClassName   <- getText
-    valueClassName <- getText
+    keyType   <- getText
+    valueType <- getText
 
     compression      <- getBool
     blockCompression <- getBool
 
-    when (not (compression && blockCompression))
+    unless (compression && blockCompression)
          (fail "only block compressed files supported")
 
-    compressionClassName <- getText
+    compressionType <- getText
 
-    when (compressionClassName /= "org.apache.hadoop.io.compress.SnappyCodec")
-         (fail $ "unsupported compression codec: " ++ T.unpack compressionClassName)
+    when (compressionType /= "org.apache.hadoop.io.compress.SnappyCodec")
+         (fail $ "unsupported compression codec: " ++ T.unpack compressionType)
 
     metadata <- getMetadata
 
     sync <- getMD5
 
-    blocks <- untilEmpty (getBlock sync)
-
-    return $ head blocks ++ last blocks
+    return Header{..}
 
 getMetadata :: Get [(Text, Text)]
 getMetadata = do
@@ -77,8 +101,8 @@ getMetadata = do
 
 ------------------------------------------------------------------------
 
-getBlock :: MD5 -> Get [Text]
-getBlock sync = do
+getRecordBlock :: MD5 -> Get k -> Get v -> Get [(k, v)]
+getRecordBlock sync gk gv = do
     escape <- getWord32le
     when (escape /= 0xffffffff)
          (fail $ "file corrupt, expected to find sync escape " ++
@@ -91,57 +115,38 @@ getBlock sync = do
 
     n <- getVInt
 
-    keyLengths <- readVInts <$> getSnappyBuffer
-    keys       <- map readText . splitBuffer keyLengths <$> getSnappyBuffer
+    let getSnappy = L.fromChunks . map Snappy.decompress <$> getBlock
+        withSnappy g = label "withSnappy" $ runEmbeded g =<< getSnappy
 
-    valueLengths <- readVInts <$> getSnappyBuffer
-    values       <- splitBuffer valueLengths <$> getSnappyBuffer
+    keyLengths <- withSnappy $ many getVInt
+    keys       <- withSnappy $ isolateN keyLengths gk
 
-    return keys
+    valueLengths <- withSnappy $ many getVInt
+    values       <- withSnappy $ isolateN valueLengths gv
 
-readVInts :: ByteString -> [Int]
-readVInts = fromGet (untilEmpty getVInt)
+    return (zip keys values)
 
-readText :: ByteString -> Text
-readText = fromGet getText
-
- -- TODO: error below is not nice
-splitBuffer :: [Int] -> ByteString -> [ByteString]
-splitBuffer [] ""      = []
-splitBuffer [] _       = error "splitBuffer: split did not occur evenly"
-splitBuffer (n:ns) bss = bs : splitBuffer ns bss'
-  where
-   (bs, bss') = B.splitAt n bss
+isolateN :: [Int] -> Get a -> Get [a]
+isolateN ns g = label "isolateN" $ mapM (`isolate` g) ns
 
 ------------------------------------------------------------------------
 
-getSnappyBuffer :: Get ByteString
-getSnappyBuffer = do
-    total <- fromIntegral <$> getVInt
-    start <- bytesRead
+runEmbeded :: Get a -> L.ByteString -> Get a
+runEmbeded g lbs = label "runEmbeded" $ case runGetOrFail g lbs of
+    Right (_, _, x)    -> return x
+    Left (_, pos, msg) -> fail ("at sub-position " ++ show pos ++ ": " ++ msg)
 
-    expectedSize <- fromIntegral <$> getWord32be
-
-    bss <- unfoldM $ do
-      pos <- bytesRead
-      case total - (pos - start) of
-        0         -> return Nothing
-        n | n > 0 -> Just <$> getNext
-        otherwise -> fail "file corrupt, decompressed too many bytes"
-
-    let bs = (B.concat bss)
-    let actualSize = B.length bs
-
-    when (expectedSize /= actualSize)
-         (fail $ "file corrupt, expected <" ++ show expectedSize ++
-                 " bytes> " ++ "but was <" ++ show actualSize ++ " bytes>")
-
-    return bs
+getBlock :: Get [ByteString]
+getBlock = label "getBlock" $ do
+    total <- getVInt
+    isolate total $ do
+        _ <- getWord32be -- original uncompressed size
+        catMaybes <$> untilEmpty getNext
   where
     getNext = do
       n <- fromIntegral <$> getWord32be
-      if n == 0 then return B.empty
-                else decompress <$> getByteString n
+      if n == 0 then return Nothing
+                else Just <$> getByteString n
 
 ------------------------------------------------------------------------
 
@@ -151,11 +156,11 @@ fromGet g bs = runGet g (L.fromStrict bs)
 getBool :: Get Bool
 getBool = (/= 0) <$> getWord8
 
+getBuffer :: Get ByteString
+getBuffer = getByteString =<< getVInt
+
 getText :: Get Text
-getText = do
-    n  <- getVInt
-    bs <- getByteString n
-    return (T.decodeUtf8 bs)
+getText = T.decodeUtf8 <$> getBuffer
 
 getMD5 :: Get MD5
 getMD5 = MD5 <$> getByteString 16

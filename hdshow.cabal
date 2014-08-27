@@ -18,7 +18,7 @@ executable hdshow
 
   build-depends:
       base            == 4.7.*
-    , binary          == 0.7.*
+    , binary          >= 0.7.2 && < 0.8
     , bytestring      == 0.10.*
     , bytestring-mmap == 0.2.*
     , monad-loops     == 0.4.*
