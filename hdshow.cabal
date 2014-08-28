@@ -17,10 +17,16 @@ executable hdshow
   hs-source-dirs: src
 
   build-depends:
-      base            == 4.7.*
-    , binary          >= 0.7.2 && < 0.8
-    , bytestring      == 0.10.*
-    , bytestring-mmap == 0.2.*
-    , monad-loops     == 0.4.*
-    , snappy          == 0.2.*
-    , text            == 1.1.*
+      base             == 4.7.*
+    , binary           >= 0.7.2 && < 0.8
+    , bytestring       == 0.10.*
+    , bytestring-mmap  == 0.2.*
+    , lens             == 4.4.*
+    , monad-loops      == 0.4.*
+    , pipes            == 4.1.*
+    , pipes-binary     == 0.4.*
+    , pipes-bytestring == 2.1.*
+    , pipes-parse      == 3.0.*
+    , snappy           == 0.2.*
+    , text             == 1.1.*
+    , thrift           == 1.0.*

@@ -1,31 +1,45 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# OPTIONS_GHC -funbox-strict-fields #-}
 {-# OPTIONS_GHC -w #-}
 
 module Main (main) where
 
-import qualified Codec.Compression.Snappy as Snappy
 import           Control.Applicative ((<$>), (<*>), many)
 import           Control.Monad (when, unless, replicateM)
 import           Control.Monad.Loops (unfoldM)
 import           Data.Binary.Get
 import           Data.Bits ((.|.), xor, shiftL)
-import           Data.ByteString (ByteString)
-import qualified Data.ByteString as B
-import qualified Data.ByteString.Char8 as C
-import qualified Data.ByteString.Lazy as L
 import           Data.Int
 import           Data.List (sort)
 import           Data.Maybe (catMaybes)
 import           Data.Monoid (Monoid, (<>), mempty, mconcat)
+import           Data.Word
+import           Text.Printf (printf)
+
+import           Control.Lens (zoom)
+
+import           Data.ByteString (ByteString)
+import qualified Data.ByteString as B
+import qualified Data.ByteString.Char8 as C
+import qualified Data.ByteString.Lazy as L
+
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
-import           Data.Word
+
 import           System.Environment (getArgs)
-import           System.IO.Posix.MMap (unsafeMMapFile)
-import           Text.Printf (printf)
+import           System.IO (IOMode(..), withBinaryFile)
+
+import           Pipes
+import           Pipes.Binary
+import qualified Pipes.ByteString as P
+import           Pipes.Parse
+
+import qualified Codec.Compression.Snappy as Snappy
+
+------------------------------------------------------------------------
 
 main :: IO ()
 main = do
@@ -35,34 +49,39 @@ main = do
       _      -> putStrLn "Usage: hdshow PATH"
 
 hdshow :: FilePath -> IO ()
-hdshow path = do
-    bs <- unsafeMMapFile path
-    let xs = runGet getSequenceFile (L.fromStrict bs)
-    mapM_ go xs
-  where
-    go (k, v) = T.putStrLn (k <> "|" <> T.pack sz)
-      where
-        sz = show (L.length v) <> " bytes"
-        v' = show (L.take 50 v)
+hdshow path =
+    withBinaryFile path ReadMode $ \h -> do
+    let p = P.fromHandle h
+    runEffect $ do
+        (Right hdr, p') <- runStateT (decodeGet getHeader) p
+        lift (print hdr)
+        rb <- evalStateT (decodeGet $ getRecordBlock (sync hdr)) p'
+        lift (putStrLn $ take 200 $ show rb)
 
 ------------------------------------------------------------------------
 
-data Header = Header {
-    keyType   :: Text
-  , valueType :: Text
-  , sync      :: MD5
-  } deriving (Show)
+data Header = Header
+    { keyType         :: !Text
+    , valueType       :: !Text
+    , compressionType :: !Text
+    , metadata        :: ![(Text, Text)]
+    , sync            :: !MD5
+    } deriving (Show)
+
+data RecordBlock = RecordBlock
+    { numRecords   :: !Int
+    , keyLengths   :: !Block
+    , keys         :: !Block
+    , valueLengths :: !Block
+    , values       :: !Block
+    } deriving (Show)
+
+data Block = Block
+    { originalSize    :: !Int
+    , compressedParts :: ![ByteString]
+    } deriving (Show)
 
 ------------------------------------------------------------------------
-
-getSequenceFile :: Get [(Text, L.ByteString)]
-getSequenceFile = do
-    hdr <- getHeader
-
-    let getKey = getText
-        getVal = getRemainingLazyByteString
-
-    concat <$> untilEmpty (getRecordBlock (sync hdr) getKey getVal)
 
 getHeader :: Get Header
 getHeader = do
@@ -81,16 +100,12 @@ getHeader = do
     blockCompression <- getBool
 
     unless (compression && blockCompression)
-         (fail "only block compressed files supported")
+           (fail "only block compressed files supported")
 
     compressionType <- getText
 
-    when (compressionType /= "org.apache.hadoop.io.compress.SnappyCodec")
-         (fail $ "unsupported compression codec: " ++ T.unpack compressionType)
-
     metadata <- getMetadata
-
-    sync <- getMD5
+    sync     <- getMD5
 
     return Header{..}
 
@@ -101,8 +116,8 @@ getMetadata = do
 
 ------------------------------------------------------------------------
 
-getRecordBlock :: MD5 -> Get k -> Get v -> Get [(k, v)]
-getRecordBlock sync gk gv = do
+getRecordBlock :: MD5 -> Get RecordBlock
+getRecordBlock sync = label "record block" $ do
     escape <- getWord32le
     when (escape /= 0xffffffff)
          (fail $ "file corrupt, expected to find sync escape " ++
@@ -113,40 +128,45 @@ getRecordBlock sync gk gv = do
          (fail $ "file corrupt, expected to find sync marker " ++
                  "<" ++ show sync ++ "> but was <" ++ show sync' ++ ">")
 
-    n <- getVInt
+    numRecords   <- getVInt
+    keyLengths   <- label "key lengths"   getBlock
+    keys         <- label "keys"          getBlock
+    valueLengths <- label "value lengths" getBlock
+    values       <- label "values"        getBlock
 
-    let getSnappy = L.fromChunks . map Snappy.decompress <$> getBlock
-        withSnappy g = label "withSnappy" $ runEmbeded g =<< getSnappy
+    return RecordBlock{..}
 
-    keyLengths <- withSnappy $ many getVInt
-    keys       <- withSnappy $ isolateN keyLengths gk
+    -- let getSnappy = L.fromChunks . map Snappy.decompress <$> getBlock
+    --     withSnappy g = label "withSnappy" $ runEmbeded g =<< getSnappy
 
-    valueLengths <- withSnappy $ many getVInt
-    values       <- withSnappy $ isolateN valueLengths gv
+    -- keyLengths <- withSnappy $ many getVInt
+    -- keys       <- withSnappy $ isolateN keyLengths gk
 
-    return (zip keys values)
+    -- valueLengths <- withSnappy $ many getVInt
+    -- values       <- withSnappy $ isolateN valueLengths gv
 
-isolateN :: [Int] -> Get a -> Get [a]
-isolateN ns g = label "isolateN" $ mapM (`isolate` g) ns
-
-------------------------------------------------------------------------
-
-runEmbeded :: Get a -> L.ByteString -> Get a
-runEmbeded g lbs = label "runEmbeded" $ case runGetOrFail g lbs of
-    Right (_, _, x)    -> return x
-    Left (_, pos, msg) -> fail ("at sub-position " ++ show pos ++ ": " ++ msg)
-
-getBlock :: Get [ByteString]
-getBlock = label "getBlock" $ do
-    total <- getVInt
-    isolate total $ do
-        _ <- getWord32be -- original uncompressed size
-        catMaybes <$> untilEmpty getNext
+getBlock :: Get Block
+getBlock = do
+    size <- getVInt
+    isolate size $ do
+        originalSize    <- fromIntegral <$> getWord32be
+        compressedParts <- catMaybes <$> untilEmpty getNext
+        return Block{..}
   where
     getNext = do
       n <- fromIntegral <$> getWord32be
       if n == 0 then return Nothing
                 else Just <$> getByteString n
+
+------------------------------------------------------------------------
+
+isolateN :: [Int] -> Get a -> Get [a]
+isolateN ns g = label "isolateN" $ mapM (`isolate` g) ns
+
+runEmbeded :: Get a -> L.ByteString -> Get a
+runEmbeded g lbs = label "runEmbeded" $ case runGetOrFail g lbs of
+    Right (_, _, x)    -> return x
+    Left (_, pos, msg) -> fail ("at sub-position " ++ show pos ++ ": " ++ msg)
 
 ------------------------------------------------------------------------
 
