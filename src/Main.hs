@@ -1,12 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 {-# OPTIONS_GHC -w #-}
 
 module Main (main) where
 
 import           Control.Applicative ((<$>), (<*>), many)
-import           Control.Monad (when, unless, replicateM)
+import           Control.Monad (when, unless, replicateM, forever)
 import           Control.Monad.Loops (unfoldM)
 import           Data.Binary.Get
 import           Data.Bits ((.|.), xor, shiftL)
@@ -54,9 +55,24 @@ hdshow path =
     let p = P.fromHandle h
     runEffect $ do
         (Right hdr, p') <- runStateT (decodeGet getHeader) p
-        lift (print hdr)
         rb <- evalStateT (decodeGet $ getRecordBlock (sync hdr)) p'
+        lift (print hdr)
         lift (putStrLn $ take 200 $ show rb)
+
+------------------------------------------------------------------------
+
+sequenceFile :: forall m. Monad m => Pipe ByteString RecordBlock m ()
+sequenceFile = do
+    _ <- prodHeader cat
+    return ()
+  where
+    prodHeader :: Producer ByteString m () -> m (R Header, Producer ByteString m ())
+    prodHeader = runStateT (decodeGet getHeader)
+
+    prodRB :: Header -> Producer ByteString m () -> m (R RecordBlock, Producer ByteString m ())
+    prodRB Header{..} = runStateT (decodeGet (getRecordBlock sync))
+
+type R = Either DecodingError
 
 ------------------------------------------------------------------------
 
