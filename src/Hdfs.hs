@@ -9,7 +9,6 @@ module Main (main) where
 import           Control.Applicative ((<$>), (<*>))
 import           Control.Exception (bracket)
 
-import           Data.Int (Int32)
 import           Data.Monoid ((<>), mempty)
 import           Data.Word (Word32, Word64)
 
@@ -22,13 +21,14 @@ import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
 import           Data.ProtocolBuffers
-import           Data.ProtocolBuffers.Orphans
+import           Data.ProtocolBuffers.Orphans ()
 import qualified Data.Serialize as Cereal
 import           Data.Text (Text)
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
 import           GHC.Generics (Generic)
-import           GHC.TypeLits
+
+import           Network.Hadoop.ProtocolInfo
 
 ------------------------------------------------------------------------
 
@@ -208,60 +208,6 @@ data RpcRequest = RpcRequest
 
 instance Encode RpcRequest
 instance Decode RpcRequest
-
-------------------------------------------------------------------------
-
--- | Request to get protocol versions for all supported rpc kinds.
-data GetProtocolVersionsRequest = GetProtocolVersionsRequest
-    { pvProtocol :: Required 1 (Value Text) -- ^ Protocol name
-    } deriving (Generic, Show)
-
-instance Encode GetProtocolVersionsRequest
-instance Decode GetProtocolVersionsRequest
-
--- | Protocol version with corresponding RPC kind.
-data ProtocolVersion = ProtocolVersion
-    { pvRpcKind  :: Required 1 (Value Text)   -- ^ RPC kind
-    , pvVersions :: Repeated 2 (Value Word64) -- ^ Protocol version corresponding to the rpc kind
-    } deriving (Generic, Show)
-
-instance Encode ProtocolVersion
-instance Decode ProtocolVersion
-
--- | Get protocol version response.
-data GetProtocolVersionsResponse = GetProtocolVersionsResponse
-    { pvProtocolVersions :: Repeated 1 (Message ProtocolVersion)
-    } deriving (Generic, Show)
-
-instance Encode GetProtocolVersionsResponse
-instance Decode GetProtocolVersionsResponse
-
-------------------------------------------------------------------------
-
--- | Get protocol signature request
-data GetProtocolSignatureRequest = GetProtocolSignatureRequest
-    { psProtocol :: Required 1 (Value Text) -- ^ Protocol name
-    , psRpcKind  :: Required 2 (Value Text) -- ^ RPC kind
-    } deriving (Generic, Show)
-
-instance Encode GetProtocolSignatureRequest
-instance Decode GetProtocolSignatureRequest
-
--- | Get protocol signature response
-data GetProtocolSignatureResponse = GetProtocolSignatureResponse
-    { psSignatures :: Repeated 1 (Message ProtocolSignature)
-    } deriving (Generic, Show)
-
-instance Encode GetProtocolSignatureResponse
-instance Decode GetProtocolSignatureResponse
-
-data ProtocolSignature = ProtocolSignature
-    { psVersion :: Required 1 (Value Word64)
-    , psMethods :: Repeated 2 (Value Word32)
-    } deriving (Generic, Show)
-
-instance Encode ProtocolSignature
-instance Decode ProtocolSignature
 
 ------------------------------------------------------------------------
 
