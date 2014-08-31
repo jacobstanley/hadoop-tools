@@ -35,8 +35,9 @@ import           System.IO (IOMode(..), withBinaryFile)
 
 import           Pipes
 import           Pipes.Binary
-import qualified Pipes.ByteString as P
+import           Pipes.ByteString (fromHandle)
 import           Pipes.Parse
+import qualified Pipes.Prelude as P
 
 import qualified Codec.Compression.Snappy as Snappy
 
@@ -52,20 +53,28 @@ main = do
 hdshow :: FilePath -> IO ()
 hdshow path =
     withBinaryFile path ReadMode $ \h -> do
-    let p = P.fromHandle h
-    runEffect $ do
-        (Right hdr, p') <- runStateT (decodeGet getHeader) p
-        rb <- evalStateT (decodeGet $ getRecordBlock (sync hdr)) p'
-        lift (print hdr)
-        lift (putStrLn $ take 200 $ show rb)
+    let p = fromHandle h :: Producer ByteString IO ()
+    xs <- P.toListM (sequenceFile p >-> P.take 5)
+    print (length xs)
+        -- (Right hdr, p') <- runStateT (decodeGet getHeader) p
+        -- rb <- evalStateT (decodeGet $ getRecordBlock (sync hdr)) p'
+        --lift (putStrLn $ take 200 $ show rb)
 
 ------------------------------------------------------------------------
 
-sequenceFile :: forall m. Monad m => Pipe ByteString RecordBlock m ()
-sequenceFile = do
-    _ <- prodHeader cat
-    return ()
+sequenceFile :: forall m. Monad m => Producer ByteString m () -> Producer RecordBlock m ()
+sequenceFile p = do
+    (Right header, p') <- lift $ prodHeader p
+    loop p' (prodRB header)
   where
+    loop :: Producer ByteString m ()
+         -> (Producer ByteString m () -> m (R RecordBlock, Producer ByteString m ()))
+         -> Producer RecordBlock m ()
+    loop p f = do
+        (Right rb, p') <- lift (f p)
+        yield rb
+        loop p' f
+
     prodHeader :: Producer ByteString m () -> m (R Header, Producer ByteString m ())
     prodHeader = runStateT (decodeGet getHeader)
 
