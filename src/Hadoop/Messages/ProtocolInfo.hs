@@ -1,7 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 
-module Network.Hadoop.ProtocolInfo where
+module Hadoop.Messages.ProtocolInfo where
 
 import Data.Word (Word32, Word64)
 
@@ -62,3 +62,21 @@ data ProtocolSignature = ProtocolSignature
 
 instance Encode ProtocolSignature
 instance Decode ProtocolSignature
+
+------------------------------------------------------------------------
+
+{-
+Example Request
+===============
+
+    req = RpcRequest
+        { reqMethodName      = putField "getProtocolSignature"
+        , reqBytes           = putField $ Just $ toBytes GetProtocolSignatureRequest
+            { psProtocol = putField "org.apache.hadoop.hdfs.protocol.ClientProtocol"
+            , psRpcKind  = putField "RPC_PROTOCOL_BUFFER"
+            }
+        , reqProtocolName    = putField "org.apache.hadoop.ipc.ProtocolMetaInfoPB"
+        , reqProtocolVersion = putField 1
+        }
+
+-}

@@ -1,7 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 
-module Network.Hadoop.Headers where
+module Hadoop.Messages.Headers where
 
 import Data.Word (Word32, Word64)
 

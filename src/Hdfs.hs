@@ -9,51 +9,77 @@ module Main (main) where
 import           Control.Applicative ((<$>), (<*>))
 import           Control.Exception (bracket)
 
-import           Data.Monoid ((<>), mempty)
-
-import           Network (PortID(..), HostName, PortNumber, withSocketsDo, connectTo)
-import           System.IO (Handle, BufferMode(..), hSetBuffering, hSetBinaryMode, hClose)
-
-import           Data.Binary.Get
-import           Data.Binary.Put
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
+import           Data.Maybe (fromJust)
+import           Data.Monoid ((<>), mempty)
+import           Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
+import qualified Data.Text.IO as T
+import           Data.Time
+import           Data.Time.Clock.POSIX
+import           Data.Word (Word16, Word32)
+
+import           Network (PortID(..), HostName, PortNumber, withSocketsDo, connectTo)
+import           System.Environment (getArgs)
+import           System.IO (Handle, BufferMode(..), hSetBuffering, hSetBinaryMode, hClose)
+import           Text.Printf (printf)
+
+import           Data.Binary.Get
+import           Data.Binary.Put
 import           Data.ProtocolBuffers
 import           Data.ProtocolBuffers.Orphans ()
 import qualified Data.Serialize as Cereal
-import           Data.Text (Text)
-import qualified Data.Text.Encoding as T
-import qualified Data.Text.IO as T
 
-import           Network.Hadoop.Headers
-import           Network.Hadoop.ProtocolInfo
+import           Hadoop.Messages.ClientNameNode
+import           Hadoop.Messages.Hdfs
+import           Hadoop.Messages.Headers
+
+import qualified Data.HashMap.Strict as H
+import           Data.ProtocolBuffers.Internal
 
 ------------------------------------------------------------------------
 
 main :: IO ()
-main =
+main = do
+    [path] <- getArgs
     withConnectTo "hadoop1" 8020 $ \h -> do
-    putStrLn "hdfs connected"
+        putStrLn "hdfs connected"
 
-    B.writeFile "/Users/jake/src/binary-templates/hadoop/ipc-ctx-haskell.bin" (toBytes reqCtx)
+        let bs = runPut (putRequest reqCtx reqHdr (req (T.pack path)))
+        L.hPut h bs
+        putStrLn "sent request"
 
-    let bs = runPut (putRequest reqCtx reqHdr req)
-    L.hPut h bs
-    putStrLn "sent request"
+        bs <- B.hGetSome h 4096
+        putStrLn $ "got response (" ++ show (B.length bs) ++ " bytes)"
 
-    bs <- B.hGetSome h 4096
-    putStrLn $ "got response (" ++ show (B.length bs) ++ " bytes)"
+        let (Right (rsp, bs')) = fromLPBytes bs
+        if getField (rspStatus rsp) == RpcSuccess
+           then do
+             let rsp = runGet getResponse (L.fromStrict bs') :: GetListingResponse
+             putStrLn $ "decoded response"
 
-    let (Right (rsp, bs')) = fromLPBytes bs
-    if getField (rspStatus rsp) == RpcSuccess
-       then do
-         let rsp = runGet getResponse (L.fromStrict bs')
-         print (rsp :: GetProtocolSignatureResponse)
-       else do
-         let (cls, stk) = runGet getError (L.fromStrict bs')
-         T.putStrLn cls
-         T.putStrLn stk
+             let xs = getField . dlPartialListing
+                    . fromJust . getField . glDirList
+                    $ rsp
+
+             print $ map (getField . fsPath) xs
+             print $ map (getField . fsLength) xs
+
+             let phex x = printf "%0o" (fromIntegral x :: Word16) :: String
+             print $ map (phex . getField . fpPerm . getField . fsPermission) xs
+
+             print $ map (getField . fsOwner) xs
+             print $ map (getField . fsGroup) xs
+
+             let hdfs2utc ms = posixSecondsToUTCTime (fromIntegral ms / 1000)
+             print $ map (hdfs2utc . getField . fsModificationTime) xs
+           else do
+             let (cls, stk) = runGet getError (L.fromStrict bs')
+             T.putStrLn cls
+             T.putStrLn stk
   where
     reqCtx = IpcConnectionContext
         { ctxProtocol = putField (Just "haskell")
@@ -69,14 +95,14 @@ main =
         , reqCallId     = putField 12345
         }
 
-    req = RpcRequest
-        { reqMethodName      = putField "getProtocolSignature"
-        , reqBytes           = putField $ Just $ toBytes GetProtocolSignatureRequest
-            { psProtocol = putField "org.apache.hadoop.hdfs.protocol.ClientProtocol"
-            , psRpcKind  = putField "RPC_PROTOCOL_BUFFER"
+    req src = RpcRequest
+        { reqMethodName      = putField "getListing"
+        , reqBytes           = putField $ Just $ toBytes GetListingRequest
+            { glSrc          = putField src
+            , glStartAfter   = putField ""
+            , glNeedLocation = putField True
             }
-            --{ pvProtocol = putField "org.apache.hadoop.ipc.ProtocolMetaInfoPB" }
-        , reqProtocolName    = putField "org.apache.hadoop.ipc.ProtocolMetaInfoPB"
+        , reqProtocolName    = putField "org.apache.hadoop.hdfs.protocol.ClientProtocol"
         , reqProtocolVersion = putField 1
         }
 
