@@ -26,12 +26,11 @@ executable hdshow
     , monad-loops          == 0.4.*
     , network              == 2.5.*
     , pipes                == 4.1.*
-    , pipes-binary         == 0.4.*
     , pipes-bytestring     == 2.1.*
-    , pipes-parse          == 3.0.*
     , protobuf             == 0.2.*
     , snappy               == 0.2.*
     , text                 == 1.1.*
     , thrift               == 1.0.*
     , time                 == 1.4.*
     , unordered-containers == 0.2.*
+    , vector               == 0.10.*

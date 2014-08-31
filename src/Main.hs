@@ -15,6 +15,7 @@ import           Data.Int
 import           Data.List (sort)
 import           Data.Maybe (catMaybes)
 import           Data.Monoid (Monoid, (<>), mempty, mconcat)
+import qualified Data.Vector as V
 import           Data.Word
 import           Text.Printf (printf)
 
@@ -34,9 +35,7 @@ import           System.Environment (getArgs)
 import           System.IO (IOMode(..), withBinaryFile)
 
 import           Pipes
-import           Pipes.Binary
 import           Pipes.ByteString (fromHandle)
-import           Pipes.Parse
 import qualified Pipes.Prelude as P
 
 import qualified Codec.Compression.Snappy as Snappy
@@ -54,34 +53,44 @@ hdshow :: FilePath -> IO ()
 hdshow path =
     withBinaryFile path ReadMode $ \h -> do
     let p = fromHandle h :: Producer ByteString IO ()
-    xs <- P.toListM (sequenceFile p >-> P.take 5)
-    print (length xs)
-        -- (Right hdr, p') <- runStateT (decodeGet getHeader) p
-        -- rb <- evalStateT (decodeGet $ getRecordBlock (sync hdr)) p'
-        --lift (putStrLn $ take 200 $ show rb)
+    xs <- P.toListM (p >-> sequenceFile >-> P.map keys >-> P.take 1)
+    print xs
 
 ------------------------------------------------------------------------
 
-sequenceFile :: forall m. Monad m => Producer ByteString m () -> Producer RecordBlock m ()
-sequenceFile p = do
-    (Right header, p') <- lift $ prodHeader p
-    loop p' (prodRB header)
+sequenceFile :: Monad m => Pipe ByteString RecordBlock m ()
+sequenceFile = recordBlocks >-> P.map (decompressRecordBlock Snappy.decompress)
+
+decompressRecordBlock :: (ByteString -> ByteString) -> CompressedRecordBlock -> RecordBlock
+decompressRecordBlock codec CompressedRecordBlock{..} = RecordBlock{..}
   where
-    loop :: Producer ByteString m ()
-         -> (Producer ByteString m () -> m (R RecordBlock, Producer ByteString m ()))
-         -> Producer RecordBlock m ()
-    loop p f = do
-        (Right rb, p') <- lift (f p)
-        yield rb
-        loop p' f
+    keys   = decompressData keyLengths   cKeys
+    values = decompressData valueLengths cValues
 
-    prodHeader :: Producer ByteString m () -> m (R Header, Producer ByteString m ())
-    prodHeader = runStateT (decodeGet getHeader)
+    keyLengths   = decompressLengths cKeyLengths
+    valueLengths = decompressLengths cValueLengths
 
-    prodRB :: Header -> Producer ByteString m () -> m (R RecordBlock, Producer ByteString m ())
-    prodRB Header{..} = runStateT (decodeGet (getRecordBlock sync))
+    decompressLengths = V.fromList . runGet (many getVInt) . decompressBlock
+    decompressData ls = runGet (V.mapM getByteString ls) . decompressBlock
 
-type R = Either DecodingError
+    decompressBlock CompressedBlock{..} = L.fromChunks (map codec compressedParts)
+
+recordBlocks :: Monad m => Pipe ByteString CompressedRecordBlock m ()
+recordBlocks = do
+    (hdr, bs) <- feed (runGetIncremental getHeader)
+    loop (runGetIncremental (getCompressedRecordBlock (sync hdr))) bs
+  where
+    feed decoder = do
+        bs <- await
+        case pushChunk decoder bs of
+            Fail _ _ err -> error err
+            Done bs' _ x -> return (x, bs')
+            decoder'     -> feed decoder'
+
+    loop decoder bs = forever $ do
+        (x, bs') <- feed (decoder `pushChunk` bs)
+        yield x
+        loop decoder bs'
 
 ------------------------------------------------------------------------
 
@@ -94,14 +103,19 @@ data Header = Header
     } deriving (Show)
 
 data RecordBlock = RecordBlock
-    { numRecords   :: !Int
-    , keyLengths   :: !Block
-    , keys         :: !Block
-    , valueLengths :: !Block
-    , values       :: !Block
+    { keys       :: !(V.Vector ByteString)
+    , values     :: !(V.Vector ByteString)
+    }
+
+data CompressedRecordBlock = CompressedRecordBlock
+    { cNumRecords   :: !Int
+    , cKeyLengths   :: !CompressedBlock
+    , cKeys         :: !CompressedBlock
+    , cValueLengths :: !CompressedBlock
+    , cValues       :: !CompressedBlock
     } deriving (Show)
 
-data Block = Block
+data CompressedBlock = CompressedBlock
     { originalSize    :: !Int
     , compressedParts :: ![ByteString]
     } deriving (Show)
@@ -141,8 +155,8 @@ getMetadata = do
 
 ------------------------------------------------------------------------
 
-getRecordBlock :: MD5 -> Get RecordBlock
-getRecordBlock sync = label "record block" $ do
+getCompressedRecordBlock :: MD5 -> Get CompressedRecordBlock
+getCompressedRecordBlock sync = label "record block" $ do
     escape <- getWord32le
     when (escape /= 0xffffffff)
          (fail $ "file corrupt, expected to find sync escape " ++
@@ -153,30 +167,21 @@ getRecordBlock sync = label "record block" $ do
          (fail $ "file corrupt, expected to find sync marker " ++
                  "<" ++ show sync ++ "> but was <" ++ show sync' ++ ">")
 
-    numRecords   <- getVInt
-    keyLengths   <- label "key lengths"   getBlock
-    keys         <- label "keys"          getBlock
-    valueLengths <- label "value lengths" getBlock
-    values       <- label "values"        getBlock
+    cNumRecords    <- getVInt
+    cKeyLengths   <- label "key lengths"   getCompressedBlock
+    cKeys         <- label "keys"          getCompressedBlock
+    cValueLengths <- label "value lengths" getCompressedBlock
+    cValues       <- label "values"        getCompressedBlock
 
-    return RecordBlock{..}
+    return CompressedRecordBlock{..}
 
-    -- let getSnappy = L.fromChunks . map Snappy.decompress <$> getBlock
-    --     withSnappy g = label "withSnappy" $ runEmbeded g =<< getSnappy
-
-    -- keyLengths <- withSnappy $ many getVInt
-    -- keys       <- withSnappy $ isolateN keyLengths gk
-
-    -- valueLengths <- withSnappy $ many getVInt
-    -- values       <- withSnappy $ isolateN valueLengths gv
-
-getBlock :: Get Block
-getBlock = do
+getCompressedBlock :: Get CompressedBlock
+getCompressedBlock = do
     size <- getVInt
     isolate size $ do
         originalSize    <- fromIntegral <$> getWord32be
         compressedParts <- catMaybes <$> untilEmpty getNext
-        return Block{..}
+        return CompressedBlock{..}
   where
     getNext = do
       n <- fromIntegral <$> getWord32be
