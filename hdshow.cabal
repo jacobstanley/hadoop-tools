@@ -19,12 +19,14 @@ executable hdshow
   build-depends:
       base                 == 4.7.*
     , binary               >= 0.7.2 && < 0.8
+    , boxes                == 0.1.*
     , bytestring           == 0.10.*
     , bytestring-mmap      == 0.2.*
     , cereal               == 0.4.*
     , lens                 == 4.4.*
     , monad-loops          == 0.4.*
     , network              == 2.5.*
+    , old-locale
     , pipes                == 4.1.*
     , pipes-bytestring     == 2.1.*
     , protobuf             == 0.2.*
@@ -34,3 +36,5 @@ executable hdshow
     , time                 == 1.4.*
     , unordered-containers == 0.2.*
     , vector               == 0.10.*
+
+  ghc-prof-options: -auto-all -caf-all

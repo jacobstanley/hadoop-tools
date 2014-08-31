@@ -9,6 +9,7 @@ module Main (main) where
 import           Control.Applicative ((<$>), (<*>))
 import           Control.Exception (bracket)
 
+import           Data.Bits ((.&.), shiftR)
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
@@ -20,12 +21,14 @@ import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
 import           Data.Time
 import           Data.Time.Clock.POSIX
-import           Data.Word (Word16, Word32)
+import           Data.Time.Format (formatTime)
+import           Data.Word (Word16, Word32, Word64)
+import           System.Locale (defaultTimeLocale)
 
 import           Network (PortID(..), HostName, PortNumber, withSocketsDo, connectTo)
 import           System.Environment (getArgs)
 import           System.IO (Handle, BufferMode(..), hSetBuffering, hSetBinaryMode, hClose)
-import           Text.Printf (printf)
+import           Text.PrettyPrint.Boxes hiding ((<>))
 
 import           Data.Binary.Get
 import           Data.Binary.Put
@@ -65,17 +68,26 @@ main = do
                     . fromJust . getField . glDirList
                     $ rsp
 
-             print $ map (getField . fsPath) xs
-             print $ map (getField . fsLength) xs
+             let getPerms     = fromIntegral . getField . fpPerm . getField . fsPermission
+                 getType      = getField . fsFileType
+                 getPath      = T.decodeUtf8 . getField . fsPath
+                 getBlockRepl = maybe 0 id . getField . fsBlockReplication
+                 getOwner     = getField . fsOwner
+                 getGroup     = getField . fsGroup
+                 getLength    = getField . fsLength
 
-             let phex x = printf "%0o" (fromIntegral x :: Word16) :: String
-             print $ map (phex . getField . fpPerm . getField . fsPermission) xs
+                 hdfs2utc ms  = posixSecondsToUTCTime (fromIntegral ms / 1000)
+                 getModTime   = hdfs2utc . getField . fsModificationTime
 
-             print $ map (getField . fsOwner) xs
-             print $ map (getField . fsGroup) xs
+                 col a f = vcat a (map (text . f) xs)
 
-             let hdfs2utc ms = posixSecondsToUTCTime (fromIntegral ms / 1000)
-             print $ map (hdfs2utc . getField . fsModificationTime) xs
+             printBox $ col left  (\x -> formatMode (getType x) (getPerms x))
+                    <+> col right (formatBlockRepl . getBlockRepl)
+                    <+> col left  (T.unpack . getOwner)
+                    <+> col left  (T.unpack . getGroup)
+                    <+> col right (formatSize . getLength)
+                    <+> col right (formatUTC . getModTime)
+                    <+> col left  (T.unpack . getPath)
            else do
              let (cls, stk) = runGet getError (L.fromStrict bs')
              T.putStrLn cls
@@ -100,7 +112,7 @@ main = do
         , reqBytes           = putField $ Just $ toBytes GetListingRequest
             { glSrc          = putField src
             , glStartAfter   = putField ""
-            , glNeedLocation = putField True
+            , glNeedLocation = putField False
             }
         , reqProtocolName    = putField "org.apache.hadoop.hdfs.protocol.ClientProtocol"
         , reqProtocolVersion = putField 1
@@ -167,3 +179,52 @@ fromBytes bs = Cereal.runGetState decodeMessage bs 0
 
 fromLPBytes :: Decode a => ByteString -> Either String (a, ByteString)
 fromLPBytes bs = Cereal.runGetState decodeLengthPrefixedMessage bs 0
+
+------------------------------------------------------------------------
+
+type Path      = Text
+type Owner     = Text
+type Group     = Text
+type Size      = Word64
+type BlockRepl = Word32
+type Perms     = Word16
+
+formatFile :: Path -> Owner -> Group -> Size -> BlockRepl -> UTCTime -> FileType -> Perms -> Box
+formatFile path o g sz mbr utc t p = text (formatMode t p)
+                                 <+> text (if mbr == 0 then "-" else (show .fromIntegral) mbr)
+                                 <+> text (T.unpack o)
+                                 <+> text (T.unpack g)
+                                 <+> text (show sz)
+                                 <+> text (formatUTC utc)
+                                 <+> text (T.unpack path)
+
+formatSize :: Word64 -> String
+formatSize b | b < 1000             = show b <> "B"
+             | b < 1000000          = show (b `div` 1000) <> "K"
+             | b < 1000000000       = show (b `div` 1000000) <> "M"
+             | b < 1000000000000    = show (b `div` 1000000000) <> "G"
+             | b < 1000000000000000 = show (b `div` 1000000000000) <> "T"
+
+formatBlockRepl :: Word32 -> String
+formatBlockRepl x | x == 0    = "-"
+                  | otherwise = show x
+
+formatUTC :: UTCTime -> String
+formatUTC = formatTime defaultTimeLocale "%Y-%m-%d %H:%M"
+
+formatMode :: FileType -> Perms -> String
+formatMode File    = ("-" <>) . formatPerms
+formatMode Dir     = ("d" <>) . formatPerms
+formatMode SymLink = ("l" <>) . formatPerms
+
+formatPerms :: Perms -> String
+formatPerms perms = format (perms `shiftR` 6)
+                 <> format (perms `shiftR` 3)
+                 <> format perms
+  where
+    format p = conv 0x4 "r" p
+            <> conv 0x2 "w" p
+            <> conv 0x1 "x" p
+
+    conv bit str p | (p .&. bit) /= 0 = str
+                   | otherwise        = "-"

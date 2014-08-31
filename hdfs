@@ -1,2 +1,2 @@
 #!/bin/sh
-./dist/build/hdshow/hdshow $1
+./dist/build/hdshow/hdshow $1 +RTS -xc
