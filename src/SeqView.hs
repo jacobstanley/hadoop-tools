@@ -46,11 +46,11 @@ main :: IO ()
 main = do
     args <- getArgs
     case args of
-      [path] -> hdshow path
-      _      -> putStrLn "Usage: hdshow PATH"
+      [path] -> seqview path
+      _      -> putStrLn "Usage: seqview PATH"
 
-hdshow :: FilePath -> IO ()
-hdshow path =
+seqview :: FilePath -> IO ()
+seqview path =
     withBinaryFile path ReadMode $ \h -> do
     let p = fromHandle h :: Producer ByteString IO ()
     xs <- P.toListM (p >-> sequenceFile >-> P.map keys >-> P.take 1)
