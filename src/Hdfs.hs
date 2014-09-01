@@ -49,20 +49,20 @@ main :: IO ()
 main = do
     [path] <- getArgs
     withConnectTo "hadoop1" 8020 $ \h -> do
-        putStrLn "hdfs connected"
+        --putStrLn "hdfs connected"
 
         let bs = runPut (putRequest reqCtx reqHdr (req (T.pack path)))
         L.hPut h bs
-        putStrLn "sent request"
+        --putStrLn "sent request"
 
         bs <- B.hGetSome h 4096
-        putStrLn $ "got response (" ++ show (B.length bs) ++ " bytes)"
+        --putStrLn $ "got response (" ++ show (B.length bs) ++ " bytes)"
 
         let (Right (rsp, bs')) = fromLPBytes bs
         if getField (rspStatus rsp) == RpcSuccess
            then do
              let rsp = runGet getResponse (L.fromStrict bs') :: GetListingResponse
-             putStrLn $ "decoded response"
+             --putStrLn $ "decoded response"
 
              let xs = getField . dlPartialListing
                     . fromJust . getField . glDirList
@@ -80,6 +80,8 @@ main = do
                  getModTime   = hdfs2utc . getField . fsModificationTime
 
                  col a f = vcat a (map (text . f) xs)
+
+             putStrLn $ "Found " <> show (length xs) <> " items"
 
              printBox $ col left  (\x -> formatMode (getType x) (getPerms x))
                     <+> col right (formatBlockRepl . getBlockRepl)
@@ -199,7 +201,8 @@ formatFile path o g sz mbr utc t p = text (formatMode t p)
                                  <+> text (T.unpack path)
 
 formatSize :: Word64 -> String
-formatSize b | b < 1000             = show b <> "B"
+formatSize b | b == 0               = "0"
+             | b < 1000             = show b <> "B"
              | b < 1000000          = show (b `div` 1000) <> "K"
              | b < 1000000000       = show (b `div` 1000000) <> "M"
              | b < 1000000000000    = show (b `div` 1000000000) <> "G"
