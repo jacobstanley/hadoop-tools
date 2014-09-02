@@ -1,7 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 
-module Hadoop.Messages.ProtocolInfo where
+module Hadoop.Protobuf.ProtocolInfo where
 
 import Data.Word (Word32, Word64)
 

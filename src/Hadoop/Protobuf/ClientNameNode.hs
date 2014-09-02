@@ -1,14 +1,14 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 
-module Hadoop.Messages.ClientNameNode where
+module Hadoop.Protobuf.ClientNameNode where
 
 import Data.ByteString (ByteString)
 import Data.ProtocolBuffers
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
-import Hadoop.Messages.Hdfs
+import Hadoop.Protobuf.Hdfs
 
 ------------------------------------------------------------------------
 

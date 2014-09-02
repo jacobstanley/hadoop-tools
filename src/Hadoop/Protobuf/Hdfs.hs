@@ -1,7 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 
-module Hadoop.Messages.Hdfs where
+module Hadoop.Protobuf.Hdfs where
 
 import Data.ByteString (ByteString)
 import Data.ProtocolBuffers
@@ -41,9 +41,7 @@ data FileStatus = FileStatus
     -- Optional fields for file
     , fsBlockReplication :: Optional 10 (Value Word32) -- ^ default = 0, only 16bits used
     , fsBlockSize        :: Optional 11 (Value Word64) -- ^ default = 0
-
-    -- TODO "Always is not a Monoid"
-    --, fsLocations        :: Optional 12 (Message LocatedBlocks) -- ^ supplied only if asked by client
+    , fsLocations        :: Optional 12 (Message LocatedBlocks) -- ^ supplied only if asked by client
     } deriving (Generic, Show)
 
 instance Encode FileStatus

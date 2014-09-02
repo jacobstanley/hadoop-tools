@@ -1,19 +1,25 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
+
+{-# OPTIONS_GHC -fdefer-type-errors #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 {-# OPTIONS_GHC -w #-}
 
 module Main (main) where
 
 import           Control.Applicative ((<$>), (<*>))
-import           Control.Exception (bracket)
+import           Control.Exception (Exception, throwIO)
+import           Control.Monad
+import           Control.Monad.IO.Class (MonadIO, liftIO)
 
 import           Data.Bits ((.&.), shiftR)
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
-import           Data.Maybe (fromJust)
+import           Data.Data (Data)
+import           Data.Maybe (fromMaybe, maybeToList)
 import           Data.Monoid ((<>), mempty)
 import           Data.Text (Text)
 import qualified Data.Text as T
@@ -22,117 +28,128 @@ import qualified Data.Text.IO as T
 import           Data.Time
 import           Data.Time.Clock.POSIX
 import           Data.Time.Format (formatTime)
+import           Data.Typeable (Typeable)
 import           Data.Word (Word16, Word32, Word64)
 import           System.Locale (defaultTimeLocale)
 
-import           Network (PortID(..), HostName, PortNumber, withSocketsDo, connectTo)
 import           System.Environment (getArgs)
 import           System.IO (Handle, BufferMode(..), hSetBuffering, hSetBinaryMode, hClose)
 import           Text.PrettyPrint.Boxes hiding ((<>))
 
-import           Data.Binary.Get
-import           Data.Binary.Put
 import           Data.ProtocolBuffers
 import           Data.ProtocolBuffers.Orphans ()
-import qualified Data.Serialize as Cereal
+import           Data.Serialize.Get
+import           Data.Serialize.Put
 
-import           Hadoop.Messages.ClientNameNode
-import           Hadoop.Messages.Hdfs
-import           Hadoop.Messages.Headers
+import           Data.Conduit
+import           Data.Conduit.Cereal
+import           Data.Conduit.Network
+
+import           Hadoop.Protobuf.ClientNameNode
+import           Hadoop.Protobuf.Hdfs
+import           Hadoop.Protobuf.Headers
 
 import qualified Data.HashMap.Strict as H
 import           Data.ProtocolBuffers.Internal
 
 ------------------------------------------------------------------------
 
+-- TODO Handle SIGPIPE
+-- import Posix
+-- main = installHandler sigPIPE Ignore Nothing
+
+f ! x = getField (f x)
+
 main :: IO ()
-main = do
-    [path] <- getArgs
-    withConnectTo "hadoop1" 8020 $ \h -> do
-        --putStrLn "hdfs connected"
+main = runTCPClient (clientSettings 8020 "hadoop1") $ \server -> do
+    putStrLn $ "Connected to " ++ show (appSockAddr server)
+    appSource server $$ app =$ appSink server
 
-        let bs = runPut (putRequest reqCtx reqHdr (req (T.pack path)))
-        L.hPut h bs
-        --putStrLn "sent request"
+app :: Conduit ByteString IO ByteString
+app = do
+    [path] <- liftIO getArgs
+    lst <- sudo "cloudera" (getListing path)
 
-        bs <- B.hGetSome h 4096
-        --putStrLn $ "got response (" ++ show (B.length bs) ++ " bytes)"
+    let xs = concatMap (dlPartialListing!) . maybeToList . (glDirList!) $ lst
 
-        let (Right (rsp, bs')) = fromLPBytes bs
-        if getField (rspStatus rsp) == RpcSuccess
-           then do
-             let rsp = runGet getResponse (L.fromStrict bs') :: GetListingResponse
-             --putStrLn $ "decoded response"
+    let getPerms     = fromIntegral . (fpPerm!) . (fsPermission!)
+        getPath      = T.decodeUtf8 . (fsPath!)
+        getBlockRepl = fromMaybe 0 . (fsBlockReplication!)
 
-             let xs = getField . dlPartialListing
-                    . fromJust . getField . glDirList
-                    $ rsp
+        hdfs2utc ms  = posixSecondsToUTCTime (fromIntegral ms / 1000)
+        getModTime   = hdfs2utc . (fsModificationTime!)
 
-             let getPerms     = fromIntegral . getField . fpPerm . getField . fsPermission
-                 getType      = getField . fsFileType
-                 getPath      = T.decodeUtf8 . getField . fsPath
-                 getBlockRepl = maybe 0 id . getField . fsBlockReplication
-                 getOwner     = getField . fsOwner
-                 getGroup     = getField . fsGroup
-                 getLength    = getField . fsLength
+        col a f = vcat a (map (text . f) xs)
 
-                 hdfs2utc ms  = posixSecondsToUTCTime (fromIntegral ms / 1000)
-                 getModTime   = hdfs2utc . getField . fsModificationTime
+    liftIO $ do
+        putStrLn $ "Found " <> show (length xs) <> " items"
 
-                 col a f = vcat a (map (text . f) xs)
+        printBox $ col left  (\x -> formatMode (fsFileType! x) (getPerms x))
+               <+> col right (formatBlockRepl . getBlockRepl)
+               <+> col left  (T.unpack . (fsOwner!))
+               <+> col left  (T.unpack . (fsGroup!))
+               <+> col right (formatSize . (fsLength!))
+               <+> col right (formatUTC . getModTime)
+               <+> col left  (T.unpack . getPath)
 
-             putStrLn $ "Found " <> show (length xs) <> " items"
-
-             printBox $ col left  (\x -> formatMode (getType x) (getPerms x))
-                    <+> col right (formatBlockRepl . getBlockRepl)
-                    <+> col left  (T.unpack . getOwner)
-                    <+> col left  (T.unpack . getGroup)
-                    <+> col right (formatSize . getLength)
-                    <+> col right (formatUTC . getModTime)
-                    <+> col left  (T.unpack . getPath)
-           else do
-             let (cls, stk) = runGet getError (L.fromStrict bs')
-             T.putStrLn cls
-             T.putStrLn stk
+sudo :: Text -> Remote a -> ConduitM ByteString ByteString IO a
+sudo user rpc = do
+    sourcePut (putRequest context header request)
+    header <- sinkGet decodeLengthPrefixedMessage
+    case rspStatus ! header of
+      Success -> sinkGet (rpcDecode rpc <$> getResponse) >>= throwLeft
+      _       -> sinkGet getError >>= liftIO . throwIO
   where
-    reqCtx = IpcConnectionContext
-        { ctxProtocol = putField (Just "haskell")
+    throwLeft (Left err) = liftIO (throwIO err)
+    throwLeft (Right x)  = return x
+
+    context = IpcConnectionContext
+        { ctxProtocol = putField (Just (rpcProtocolName rpc))
         , ctxUserInfo = putField (Just UserInformation
-            { effectiveUser = putField (Just "cloudera")
+            { effectiveUser = putField (Just user)
             , realUser      = mempty
             })
         }
 
-    reqHdr = RpcRequestHeader
+    header = RpcRequestHeader
         { reqKind       = putField (Just ProtocolBuffer)
         , reqOp         = putField (Just FinalPacket)
-        , reqCallId     = putField 12345
+        , reqCallId     = putField 1
         }
 
-    req src = RpcRequest
-        { reqMethodName      = putField "getListing"
-        , reqBytes           = putField $ Just $ toBytes GetListingRequest
-            { glSrc          = putField src
-            , glStartAfter   = putField ""
-            , glNeedLocation = putField False
-            }
-        , reqProtocolName    = putField "org.apache.hadoop.hdfs.protocol.ClientProtocol"
-        , reqProtocolVersion = putField 1
+    request = RpcRequest
+        { reqMethodName      = putField (rpcMethodName rpc)
+        , reqBytes           = putField (Just (rpcBytes rpc))
+        , reqProtocolName    = putField (rpcProtocolName rpc)
+        , reqProtocolVersion = putField (rpcProtocolVersion rpc)
         }
 
-withConnectTo :: HostName -> PortNumber -> (Handle -> IO a) -> IO a
-withConnectTo host port = bracket connect hClose
-  where
-    connect = withSocketsDo $ do
-      h <- connectTo host (PortNumber port)
-      --hSetBuffering h (BlockBuffering (Just 4096))
-      hSetBuffering h NoBuffering
-      hSetBinaryMode h True
-      return h
+------------------------------------------------------------------------
 
--- TODO Handle SIGPIPE
--- import Posix
--- main = installHandler sigPIPE Ignore Nothing
+data RpcError = RpcError Text Text
+    deriving (Show, Eq, Data, Typeable)
+
+instance Exception RpcError
+
+------------------------------------------------------------------------
+
+data Remote a = Remote
+    { rpcProtocolName    :: Text
+    , rpcProtocolVersion :: Word64
+    , rpcMethodName      :: Text
+    , rpcBytes           :: ByteString
+    , rpcDecode          :: ByteString -> Either RpcError a
+    }
+
+rpc :: (Decode b, Encode a) => Text -> Word64 -> Text -> a -> Remote b
+rpc protocol ver method arg = Remote protocol ver method (toBytes arg) fromBytes
+
+getListing :: FilePath -> Remote GetListingResponse
+getListing path = rpc "org.apache.hadoop.hdfs.protocol.ClientProtocol" 1 "getListing" GetListingRequest
+                { glSrc          = putField (T.pack path)
+                , glStartAfter   = putField ""
+                , glNeedLocation = putField False
+                }
 
 ------------------------------------------------------------------------
 
@@ -146,41 +163,36 @@ putRequest ctx hdr req = do
     putWord8 80 -- auth method (80 = simple, 81 = kerberos/gssapi, 82 = token/digest-md5)
     putWord8 0  -- ipc serialization type (0 = protobuf)
 
-    let bs = toBytes ctx
-    putWord32be (fromIntegral (B.length bs))
-    putByteString bs
+    putBlob (toBytes ctx)
+    putBlob (toLPBytes hdr <> toLPBytes req)
+  where
+    putBlob bs = do
+        putWord32be (fromIntegral (B.length bs))
+        putByteString bs
 
-    let bs' = toLPBytes hdr <> toLPBytes req
-    putWord32be (fromIntegral (B.length bs'))
-    putByteString bs'
-
-getResponse :: Decode a => Get a
+getResponse :: Get ByteString
 getResponse = do
     n <- fromIntegral <$> getWord32be
-    bs <- getByteString n
-    case fromBytes bs of
-        Left err      -> fail $ "getResponse: " ++ err
-        Right (x, "") -> return x
-        Right (_, _)  -> fail $ "getResponse: decoded response but did not consume enough bytes"
+    getByteString n
 
-getError :: Get (Text, Text)
-getError = (,) <$> getText <*> getText
+getError :: Get RpcError
+getError = RpcError <$> getText <*> getText
   where
     getText = do
         n <- fromIntegral <$> getWord32be
         T.decodeUtf8 <$> getByteString n
 
 toBytes :: Encode a => a -> ByteString
-toBytes = Cereal.runPut . encodeMessage
+toBytes = runPut . encodeMessage
 
 toLPBytes :: Encode a => a -> ByteString
-toLPBytes = Cereal.runPut . encodeLengthPrefixedMessage
+toLPBytes = runPut . encodeLengthPrefixedMessage
 
-fromBytes :: Decode a => ByteString -> Either String (a, ByteString)
-fromBytes bs = Cereal.runGetState decodeMessage bs 0
-
-fromLPBytes :: Decode a => ByteString -> Either String (a, ByteString)
-fromLPBytes bs = Cereal.runGetState decodeLengthPrefixedMessage bs 0
+fromBytes :: Decode a => ByteString -> Either RpcError a
+fromBytes bs = case runGetState decodeMessage bs 0 of
+    Left err      -> Left (RpcError "fromBytes" (T.pack err))
+    Right (x, "") -> Right x
+    Right (_, _)  -> Left (RpcError "fromBytes" "decoded response but did not consume enough bytes")
 
 ------------------------------------------------------------------------
 

@@ -1,7 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 
-module Hadoop.Messages.Headers where
+module Hadoop.Protobuf.Headers where
 
 import Data.Word (Word32, Word64)
 
@@ -81,9 +81,9 @@ instance Decode RpcRequest
 
 -- | Success or failure. The reponse header's error detail, exception
 -- class name and error message contains further details on the error.
-data RpcStatus = RpcSuccess -- ^ Succeeded
-               | RpcError   -- ^ Non-fatal error, connection left open
-               | RpcFatal   -- ^ Fatal error, connection closed
+data RpcStatus = Success -- ^ Succeeded
+               | Error   -- ^ Non-fatal error, connection left open
+               | Fatal   -- ^ Fatal error, connection closed
   deriving (Generic, Show, Eq, Enum)
 
 -- | Note that RPC response header is also used when connection setup fails.
@@ -107,7 +107,7 @@ data RpcResponseHeader = RpcResponseHeader
     -- | Fields below don't apply until v9
     --, rspExceptionClassName :: Optional 4 (Value Text)            -- ^ If the request fails
     --, rspErrorMsg           :: Optional 5 (Value Text)            -- ^ If the request fails, often contains stack trace
-    --, rspErrorDetail        :: Optional 6 (Enumeration RpcError)  -- ^ In case of error
+    --, rspErrorDetail        :: Optional 6 (Enumeration Error)  -- ^ In case of error
     --, rspClientId           :: Optional 7 (Value ByteString)      -- ^ Globally unique client ID
     --, rspRetryCount         :: Optional 8 (Value Int32)
     } deriving (Generic, Show)
@@ -116,10 +116,10 @@ instance Encode RpcResponseHeader
 instance Decode RpcResponseHeader
 
 {-
--- RpcError doesn't apply until v9
+-- Error doesn't apply until v9
 
 -- | Describes why an RPC error occurred.
-data RpcError = ErrorApplication         -- ^ RPC failed - RPC app threw exception
+data Error = ErrorApplication         -- ^ RPC failed - RPC app threw exception
               | ErrorNoSuchMethod        -- ^ RPC error - no such method
               | ErrorNoSuchProtocol      -- ^ RPC error - no such protocol
               | ErrorRpcServer           -- ^ RPC error on server side
@@ -137,7 +137,7 @@ data RpcError = ErrorApplication         -- ^ RPC failed - RPC app threw excepti
               | FatalCode Int                 -- ^ Fatal error that we don't know about
   deriving (Generic, Show)
 
-instance Enum RpcError where
+instance Enum Error where
     toEnum n = case n of
       1  -> ErrorApplication
       2  -> ErrorNoSuchMethod

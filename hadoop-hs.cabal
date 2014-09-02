@@ -22,15 +22,17 @@ executable hh
     , boxes                == 0.1.*
     , bytestring           == 0.10.*
     , cereal               == 0.4.*
+    , cereal-conduit       == 0.7.*
+    , conduit              == 1.2.*
+    , conduit-extra        == 1.1.*
     , monad-loops          == 0.4.*
-    , network              == 2.5.*
     , old-locale           == 1.0.*
     , pipes                == 4.1.*
     , pipes-bytestring     == 2.1.*
     , protobuf             == 0.2.*
     , snappy               == 0.2.*
     , text                 == 1.1.*
-    --, thrift               == 1.0.*
     , time                 == 1.4.*
+    , transformers         == 0.4.*
     , unordered-containers == 0.2.*
     , vector               == 0.10.*
