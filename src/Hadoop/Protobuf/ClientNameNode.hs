@@ -45,3 +45,20 @@ data MkdirsResponse = MkdirsResponse
 
 instance Encode MkdirsResponse
 instance Decode MkdirsResponse
+
+------------------------------------------------------------------------
+
+data DeleteRequest = DeleteRequest
+    { dlSrc       :: Required 1 (Value Text)
+    , dlRecursive :: Required 2 (Value Bool)
+    } deriving (Generic, Show)
+
+instance Encode DeleteRequest
+instance Decode DeleteRequest
+
+data DeleteResponse = DeleteResponse
+    { dlResult :: Required 1 (Value Bool)
+    } deriving (Generic, Show)
+
+instance Encode DeleteResponse
+instance Decode DeleteResponse

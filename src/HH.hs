@@ -61,7 +61,8 @@ main = do
     cmd <- execParser optsParser
     handle printError (runTcp (app cmd))
   where
-    optsParser = info (helper <*> options) (fullDesc <> header "hh - Blazing fast interaction with HDFS")
+    optsParser = info (helper <*> options)
+                      (fullDesc <> header "hh - Blazing fast interaction with HDFS")
 
     printError (RpcError subject body) = T.putStrLn subject >> T.putStrLn body
 
@@ -78,14 +79,19 @@ currentDir = "/user/cloudera"
 
 ------------------------------------------------------------------------
 
-data Command = Ls FilePath
-             | Mkdir FilePath
-
 app :: Command -> Conduit ByteString IO ByteString
-app (Ls path)    = printListing path
-app (Mkdir path) = sudo username (mkdirs path False) >>= \x ->
-                       unless (mdResult ! x)
-                              (liftIO $ putStrLn $ "Failed to create: " <> path)
+app c = case c of
+    List path -> printListing path
+
+    Mkdir path parent -> do
+        ok <- (mdResult!) <$> sudo username (mkdirs path parent)
+        unless ok $ puts $ "Failed to create: " <> path
+
+    Remove path recursive -> do
+        ok <- (dlResult!) <$> sudo username (delete path recursive)
+        unless ok $ puts $ "Failed to remove: " <> path
+  where
+    puts = liftIO . putStrLn
 
 runTcp :: ConduitM ByteString ByteString IO a -> IO a
 runTcp c = runTCPClient namenode $ \server -> do
@@ -94,22 +100,37 @@ runTcp c = runTCPClient namenode $ \server -> do
     appSource server =$= runWrite $$ appSink server
     readIORef ref
 
+------------------------------------------------------------------------
+
+type CreateParent = Bool
+type Recursive = Bool
+
+data Command = List FilePath
+             | Mkdir  FilePath CreateParent
+             | Remove FilePath Recursive
+
 options :: Parser Command
 options = subparser $ command "ls"    (info ls    $ progDesc "List the contents of a directory")
                    <> command "mkdir" (info mkdir $ progDesc "Create a directory in the specified location")
+                   <> command "rm"    (info rm    $ progDesc "Delete a file or directory")
   where
-    ls    = Ls    <$> argument str (path <> help "the directory to list")
-    mkdir = Mkdir <$> argument str (path <> help "the directory to create")
+    ls    = List   <$> argument str (dir       <> help "the directory to list")
+    mkdir = Mkdir  <$> argument str (dir       <> help "the directory to create")
+                   <*> switch       (short 'p' <> help "create intermediate directories")
+    rm    = Remove <$> argument str (path      <> help "the file/directory to remove")
+                   <*> switch       (short 'r' <> help "recursively remove the whole file hierarchy")
 
-    path = completer dirCompletion <> metavar "PATH"
+    path = completer (fileCompletion (const True)) <> metavar "DIRECTORY"
+    dir  = completer (fileCompletion (== Dir))     <> metavar "PATH"
 
-dirCompletion :: Completer
-dirCompletion = mkCompleter $ \path -> handle ignore $ runTcp $ do
+fileCompletion :: (FileType -> Bool) -> Completer
+fileCompletion p = mkCompleter $ \path -> handle ignore $ runTcp $ do
     let (dir, file) = splitFileName' path
     ls <- sudo username $ getListing dir
 
     return $ filter (path `isPrefixOf`)
            . map (mkPath dir)
+           . filter (p . (fsFileType!))
            . concatMap (dlPartialListing!)
            . maybeToList . (glDirList!) $ ls
   where
@@ -227,6 +248,12 @@ mkdirs path createParent = hdfs "mkdirs" MkdirsRequest
     { mdSrc          = putField (T.pack path)
     , mdMasked       = putField (FilePermission (putField 0o755))
     , mdCreateParent = putField createParent
+    }
+
+delete :: FilePath -> Bool -> Remote DeleteResponse
+delete path recursive = hdfs "delete" DeleteRequest
+    { dlSrc       = putField (T.pack path)
+    , dlRecursive = putField recursive
     }
 
 ------------------------------------------------------------------------
