@@ -10,15 +10,17 @@
 module Main (main) where
 
 import           Control.Applicative ((<$>), (<*>))
-import           Control.Exception (Exception, throwIO)
+import           Control.Exception (Exception, throwIO, handle)
 import           Control.Monad
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 
 import           Data.Bits ((.&.), shiftR)
 import           Data.ByteString (ByteString)
-import qualified Data.ByteString as B
+import qualified Data.ByteString.Char8 as B
 import qualified Data.ByteString.Lazy as L
 import           Data.Data (Data)
+import           Data.IORef
+import           Data.List (isPrefixOf)
 import           Data.Maybe (fromMaybe, maybeToList)
 import           Data.Monoid ((<>), mempty)
 import           Data.Text (Text)
@@ -30,10 +32,11 @@ import           Data.Time.Clock.POSIX
 import           Data.Time.Format (formatTime)
 import           Data.Typeable (Typeable)
 import           Data.Word (Word16, Word32, Word64)
-import           System.Locale (defaultTimeLocale)
 
 import           System.Environment (getArgs)
+import           System.FilePath
 import           System.IO (Handle, BufferMode(..), hSetBuffering, hSetBinaryMode, hClose)
+import           System.Locale (defaultTimeLocale)
 import           Text.PrettyPrint.Boxes hiding ((<>))
 
 import           Data.ProtocolBuffers
@@ -49,28 +52,88 @@ import           Hadoop.Protobuf.ClientNameNode
 import           Hadoop.Protobuf.Hdfs
 import           Hadoop.Protobuf.Headers
 
-import qualified Data.HashMap.Strict as H
-import           Data.ProtocolBuffers.Internal
+import           Options.Applicative hiding (Success)
 
 ------------------------------------------------------------------------
 
--- TODO Handle SIGPIPE
--- import Posix
--- main = installHandler sigPIPE Ignore Nothing
+main :: IO ()
+main = do
+    cmd <- execParser optsParser
+    handle printError (runTcp (app cmd))
+  where
+    optsParser = info (helper <*> options) (fullDesc <> header "hh - Blazing fast interaction with HDFS")
+
+    printError (RpcError subject body) = T.putStrLn subject >> T.putStrLn body
+
+------------------------------------------------------------------------
+
+namenode :: ClientSettings
+namenode = clientSettings 8020 "hadoop1"
+
+username :: Text
+username = "cloudera"
+
+currentDir :: FilePath
+currentDir = "/user/cloudera"
+
+------------------------------------------------------------------------
+
+data Command = Ls FilePath
+             | Mkdir FilePath
+
+app :: Command -> Conduit ByteString IO ByteString
+app (Ls path)    = printListing path
+app (Mkdir path) = sudo username (mkdirs path False) >>= \x ->
+                       unless (mdResult ! x)
+                              (liftIO $ putStrLn $ "Failed to create: " <> path)
+
+runTcp :: ConduitM ByteString ByteString IO a -> IO a
+runTcp c = runTCPClient namenode $ \server -> do
+    ref <- newIORef (error "_|_")
+    let runWrite = c >>= liftIO . atomicWriteIORef ref
+    appSource server =$= runWrite $$ appSink server
+    readIORef ref
+
+options :: Parser Command
+options = subparser $ command "ls"    (info ls    $ progDesc "List the contents of a directory")
+                   <> command "mkdir" (info mkdir $ progDesc "Create a directory in the specified location")
+  where
+    ls    = Ls    <$> argument str (path <> help "the directory to list")
+    mkdir = Mkdir <$> argument str (path <> help "the directory to create")
+
+    path = completer dirCompletion <> metavar "PATH"
+
+dirCompletion :: Completer
+dirCompletion = mkCompleter $ \path -> handle ignore $ runTcp $ do
+    let (dir, file) = splitFileName' path
+    ls <- sudo username $ getListing dir
+
+    return $ filter (path `isPrefixOf`)
+           . map (mkPath dir)
+           . concatMap (dlPartialListing!)
+           . maybeToList . (glDirList!) $ ls
+  where
+    ignore (RpcError _ _) = return []
+
+    mkPath d x = d </> B.unpack (fsPath! x) <> suffix x
+
+    splitFileName' p = case splitFileName p of
+        ("./", f) -> ("", f)
+        (d, f)    -> (d, f)
+
+    suffix x = case fsFileType! x of
+        Dir -> "/"
+        _   -> ""
+
+------------------------------------------------------------------------
 
 f ! x = getField (f x)
 
-main :: IO ()
-main = runTCPClient (clientSettings 8020 "hadoop1") $ \server -> do
-    putStrLn $ "Connected to " ++ show (appSockAddr server)
-    appSource server $$ app =$ appSink server
+printListing :: FilePath -> Conduit ByteString IO ByteString
+printListing path = do
+    ls <- sudo username (getListing path)
 
-app :: Conduit ByteString IO ByteString
-app = do
-    [path] <- liftIO getArgs
-    lst <- sudo "cloudera" (getListing path)
-
-    let xs = concatMap (dlPartialListing!) . maybeToList . (glDirList!) $ lst
+    let xs = concatMap (dlPartialListing!) . maybeToList . (glDirList!) $ ls
 
     let getPerms     = fromIntegral . (fpPerm!) . (fsPermission!)
         getPath      = T.decodeUtf8 . (fsPath!)
@@ -144,12 +207,27 @@ data Remote a = Remote
 rpc :: (Decode b, Encode a) => Text -> Word64 -> Text -> a -> Remote b
 rpc protocol ver method arg = Remote protocol ver method (toBytes arg) fromBytes
 
+hdfs :: (Decode b, Encode a) => Text -> a -> Remote b
+hdfs = rpc "org.apache.hadoop.hdfs.protocol.ClientProtocol" 1
+
 getListing :: FilePath -> Remote GetListingResponse
-getListing path = rpc "org.apache.hadoop.hdfs.protocol.ClientProtocol" 1 "getListing" GetListingRequest
-                { glSrc          = putField (T.pack path)
-                , glStartAfter   = putField ""
-                , glNeedLocation = putField False
-                }
+getListing path = hdfs "getListing" GetListingRequest
+    { glSrc          = putField (T.pack path')
+    , glStartAfter   = putField ""
+    , glNeedLocation = putField False
+    }
+  where
+    -- TODO Move current directory to a config file
+    path' = if "/" `isPrefixOf` path
+            then path
+            else currentDir </> path
+
+mkdirs :: FilePath -> Bool -> Remote MkdirsResponse
+mkdirs path createParent = hdfs "mkdirs" MkdirsRequest
+    { mdSrc          = putField (T.pack path)
+    , mdMasked       = putField (FilePermission (putField 0o755))
+    , mdCreateParent = putField createParent
+    }
 
 ------------------------------------------------------------------------
 

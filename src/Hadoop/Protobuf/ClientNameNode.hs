@@ -27,3 +27,21 @@ data GetListingResponse = GetListingResponse
 
 instance Encode GetListingResponse
 instance Decode GetListingResponse
+
+------------------------------------------------------------------------
+
+data MkdirsRequest = MkdirsRequest
+    { mdSrc          :: Required 1 (Value Text)
+    , mdMasked       :: Required 2 (Message FilePermission)
+    , mdCreateParent :: Required 3 (Value Bool)
+    } deriving (Generic, Show)
+
+instance Encode MkdirsRequest
+instance Decode MkdirsRequest
+
+data MkdirsResponse = MkdirsResponse
+    { mdResult :: Required 1 (Value Bool)
+    } deriving (Generic, Show)
+
+instance Encode MkdirsResponse
+instance Decode MkdirsResponse
