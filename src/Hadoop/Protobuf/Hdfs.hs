@@ -12,6 +12,21 @@ import GHC.Generics (Generic)
 
 ------------------------------------------------------------------------
 
+-- | Summary of a file or directory
+data ContentSummary = ContentSummary
+    { csLength         :: Required 1 (Value Word64)
+    , csFileCount      :: Required 2 (Value Word64)
+    , csDirectoryCount :: Required 3 (Value Word64)
+    , csQuota          :: Required 4 (Value Word64)
+    , csSpaceConsumed  :: Required 5 (Value Word64)
+    , csSpaceQuota     :: Required 6 (Value Word64)
+    } deriving (Generic, Show)
+
+instance Encode ContentSummary
+instance Decode ContentSummary
+
+------------------------------------------------------------------------
+
 -- | Directory listing.
 data DirectoryListing = DirectoryListing
     { dlPartialListing :: Repeated 1 (Message FileStatus)

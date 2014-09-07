@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# OPTIONS_GHC -fcontext-stack=37 #-}
 
 module Hadoop.Protobuf.ClientNameNode where
 
@@ -13,20 +14,52 @@ import Hadoop.Protobuf.Hdfs
 ------------------------------------------------------------------------
 
 data GetListingRequest = GetListingRequest
-    { glSrc          :: Required 1 (Value Text)       -- ^ the directory to list
-    , glStartAfter   :: Required 2 (Value ByteString) -- ^ begin the listing after this file (encoded java utf8)
-    , glNeedLocation :: Required 3 (Value Bool)       -- ^ return the location data in the cluster
+    { lsSrc          :: Required 1 (Value Text)       -- ^ the directory to list
+    , lsStartAfter   :: Required 2 (Value ByteString) -- ^ begin the listing after this file (encoded java utf8)
+    , lsNeedLocation :: Required 3 (Value Bool)       -- ^ return the location data in the cluster
     } deriving (Generic, Show)
 
 instance Encode GetListingRequest
 instance Decode GetListingRequest
 
 data GetListingResponse = GetListingResponse
-    { glDirList :: Optional 1 (Message DirectoryListing)
+    { lsDirList :: Optional 1 (Message DirectoryListing)
     } deriving (Generic, Show)
 
 instance Encode GetListingResponse
 instance Decode GetListingResponse
+
+------------------------------------------------------------------------
+
+data GetFileInfoRequest = GetFileInfoRequest
+    { fiSrc :: Required 1 (Value Text)
+    } deriving (Generic, Show)
+
+instance Encode GetFileInfoRequest
+instance Decode GetFileInfoRequest
+
+data GetFileInfoResponse = GetFileInfoResponse
+    { fiFileStatus :: Optional 1 (Message FileStatus)
+    } deriving (Generic, Show)
+
+instance Encode GetFileInfoResponse
+instance Decode GetFileInfoResponse
+
+------------------------------------------------------------------------
+
+data GetContentSummaryRequest = GetContentSummaryRequest
+    { csPath :: Required 1 (Value Text)
+    } deriving (Generic, Show)
+
+instance Encode GetContentSummaryRequest
+instance Decode GetContentSummaryRequest
+
+data GetContentSummaryResponse = GetContentSummaryResponse
+    { csSummary :: Required 1 (Message ContentSummary)
+    } deriving (Generic, Show)
+
+instance Encode GetContentSummaryResponse
+instance Decode GetContentSummaryResponse
 
 ------------------------------------------------------------------------
 

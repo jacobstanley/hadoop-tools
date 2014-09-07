@@ -64,7 +64,7 @@ main = do
     optsParser = info (helper <*> options)
                       (fullDesc <> header "hh - Blazing fast interaction with HDFS")
 
-    printError (RpcError subject body) = T.putStrLn subject >> T.putStrLn body
+    printError (RemoteError subject body) = T.putStrLn subject >> T.putStrLn body
 
 ------------------------------------------------------------------------
 
@@ -80,23 +80,24 @@ currentDir = "/user/cloudera"
 ------------------------------------------------------------------------
 
 app :: Command -> Conduit ByteString IO ByteString
-app c = case c of
-    List path -> printListing path
+app cmd = case cmd of
+    List path      -> printListing path
+    DiskUsage path -> printDiskUsage path
 
     Mkdir path parent -> do
-        ok <- (mdResult!) <$> sudo username (mkdirs path parent)
-        unless ok $ puts $ "Failed to create: " <> path
+      ok <- mkdirs path parent
+      unless ok $ puts $ "Failed to create: " <> path
 
     Remove path recursive -> do
-        ok <- (dlResult!) <$> sudo username (delete path recursive)
-        unless ok $ puts $ "Failed to remove: " <> path
+      ok <- delete path recursive
+      unless ok $ puts $ "Failed to remove: " <> path
   where
     puts = liftIO . putStrLn
 
-runTcp :: ConduitM ByteString ByteString IO a -> IO a
+runTcp :: Remote a -> IO a
 runTcp c = runTCPClient namenode $ \server -> do
     ref <- newIORef (error "_|_")
-    let runWrite = c >>= liftIO . atomicWriteIORef ref
+    let runWrite = login username >> c >>= liftIO . atomicWriteIORef ref
     appSource server =$= runWrite $$ appSink server
     readIORef ref
 
@@ -106,94 +107,183 @@ type CreateParent = Bool
 type Recursive = Bool
 
 data Command = List FilePath
-             | Mkdir  FilePath CreateParent
+             | DiskUsage FilePath
+             | Mkdir FilePath CreateParent
              | Remove FilePath Recursive
 
+-- how the amount of space, in bytes, used by the files
 options :: Parser Command
 options = subparser $ command "ls"    (info ls    $ progDesc "List the contents of a directory")
+                   <> command "du"    (info du    $ progDesc "Show the amount of space used by file or directory")
                    <> command "mkdir" (info mkdir $ progDesc "Create a directory in the specified location")
                    <> command "rm"    (info rm    $ progDesc "Delete a file or directory")
   where
-    ls    = List   <$> argument str (dir       <> help "the directory to list")
-    mkdir = Mkdir  <$> argument str (dir       <> help "the directory to create")
-                   <*> switch       (short 'p' <> help "create intermediate directories")
-    rm    = Remove <$> argument str (path      <> help "the file/directory to remove")
-                   <*> switch       (short 'r' <> help "recursively remove the whole file hierarchy")
+    ls    = List      <$> argument str (dir       <> help "the directory to list")
+    du    = DiskUsage <$> argument str (path      <> help "the file/directory to check the usage of")
+    mkdir = Mkdir     <$> argument str (dir       <> help "the directory to create")
+                      <*> switch       (short 'p' <> help "create intermediate directories")
+    rm    = Remove    <$> argument str (path      <> help "the file/directory to remove")
+                      <*> switch       (short 'r' <> help "recursively remove the whole file hierarchy")
 
-    path = completer (fileCompletion (const True)) <> metavar "DIRECTORY"
-    dir  = completer (fileCompletion (== Dir))     <> metavar "PATH"
+    path = completer (fileCompletion (const True)) <> metavar "PATH"
+    dir  = completer (fileCompletion (== Dir))     <> metavar "DIRECTORY"
 
 fileCompletion :: (FileType -> Bool) -> Completer
 fileCompletion p = mkCompleter $ \path -> handle ignore $ runTcp $ do
     let (dir, file) = splitFileName' path
-    ls <- sudo username $ getListing dir
+    ls <- getListing dir
 
     return $ filter (path `isPrefixOf`)
-           . map (mkPath dir)
-           . filter (p . (fsFileType!))
-           . concatMap (dlPartialListing!)
-           . maybeToList . (glDirList!) $ ls
+           . map (getPath dir)
+           . filter (p . get fsFileType)
+           . concatMap (get dlPartialListing)
+           . maybeToList  $ ls
   where
-    ignore (RpcError _ _) = return []
-
-    mkPath d x = d </> B.unpack (fsPath! x) <> suffix x
+    ignore (RemoteError _ _) = return []
 
     splitFileName' p = case splitFileName p of
         ("./", f) -> ("", f)
         (d, f)    -> (d, f)
 
-    suffix x = case fsFileType! x of
+getPath :: FilePath -> FileStatus -> FilePath
+getPath parent file = parent </> B.unpack (get fsPath file) <> suffix
+  where
+    suffix = case get fsFileType file of
         Dir -> "/"
         _   -> ""
 
 ------------------------------------------------------------------------
 
-f ! x = getField (f x)
+printDiskUsage :: FilePath -> Remote ()
+printDiskUsage path = do
+    mls <- getListing path
+    case mls of
+      Nothing -> liftIO $ putStrLn $ "File/directory does not exist: " <> path
+      Just ls -> do
+        let files = map (getPath path) (get dlPartialListing ls)
+        css <- zip files <$> mapM getContentSummary files
 
-printListing :: FilePath -> Conduit ByteString IO ByteString
+        let col a f = vcat a (map (text . f) css)
+
+        liftIO $ do
+            printBox $ col right (formatSize . get csLength . snd)
+                   <+> col left  fst
+
+printListing :: FilePath -> Remote ()
 printListing path = do
-    ls <- sudo username (getListing path)
+    mls <- getListing path
+    case mls of
+      Nothing -> liftIO . putStrLn $ "Directory does not exist: " <> path
+      Just ls -> do
+        let getPerms     = fromIntegral . get fpPerm . get fsPermission
+            getBlockRepl = fromMaybe 0 . get fsBlockReplication
 
-    let xs = concatMap (dlPartialListing!) . maybeToList . (glDirList!) $ ls
+            hdfs2utc ms  = posixSecondsToUTCTime (fromIntegral ms / 1000)
+            getModTime   = hdfs2utc . get fsModificationTime
 
-    let getPerms     = fromIntegral . (fpPerm!) . (fsPermission!)
-        getPath      = T.decodeUtf8 . (fsPath!)
-        getBlockRepl = fromMaybe 0 . (fsBlockReplication!)
+            -- TODO: Fetch rest of partial listing
+            xs      = get dlPartialListing ls
+            col a f = vcat a (map (text . f) xs)
 
-        hdfs2utc ms  = posixSecondsToUTCTime (fromIntegral ms / 1000)
-        getModTime   = hdfs2utc . (fsModificationTime!)
+        liftIO $ do
+            putStrLn $ "Found " <> show (length xs) <> " items"
 
-        col a f = vcat a (map (text . f) xs)
+            printBox $ col left  (\x -> formatMode (get fsFileType x) (getPerms x))
+                   <+> col right (formatBlockRepl . getBlockRepl)
+                   <+> col left  (T.unpack . get fsOwner)
+                   <+> col left  (T.unpack . get fsGroup)
+                   <+> col right (formatSize . get fsLength)
+                   <+> col right (formatUTC . getModTime)
+                   <+> col left  (T.unpack . T.decodeUtf8 . get fsPath)
 
-    liftIO $ do
-        putStrLn $ "Found " <> show (length xs) <> " items"
+------------------------------------------------------------------------
 
-        printBox $ col left  (\x -> formatMode (fsFileType! x) (getPerms x))
-               <+> col right (formatBlockRepl . getBlockRepl)
-               <+> col left  (T.unpack . (fsOwner!))
-               <+> col left  (T.unpack . (fsGroup!))
-               <+> col right (formatSize . (fsLength!))
-               <+> col right (formatUTC . getModTime)
-               <+> col left  (T.unpack . getPath)
+type Remote a = ConduitM ByteString ByteString IO a
 
-sudo :: Text -> Remote a -> ConduitM ByteString ByteString IO a
-sudo user rpc = do
-    sourcePut (putRequest context header request)
-    header <- sinkGet decodeLengthPrefixedMessage
-    case rspStatus ! header of
-      Success -> sinkGet (rpcDecode rpc <$> getResponse) >>= throwLeft
-      _       -> sinkGet getError >>= liftIO . throwIO
+data RemoteCall a = RemoteCall
+    { rpcProtocolName    :: Text
+    , rpcProtocolVersion :: Word64
+    , rpcMethodName      :: Text
+    , rpcBytes           :: ByteString
+    , rpcDecode          :: ByteString -> Either RemoteError a
+    }
+
+data RemoteError = RemoteError Text Text
+    deriving (Show, Eq, Data, Typeable)
+
+instance Exception RemoteError
+
+------------------------------------------------------------------------
+
+get :: HasField a => (t -> a) -> t -> FieldType a
+get f x = getField (f x)
+
+------------------------------------------------------------------------
+
+mkRemote :: (Decode b, Encode a) => Text -> Word64 -> Text -> a -> Remote b
+mkRemote protocol ver method arg = invoke (RemoteCall protocol ver method (toBytes arg) fromBytes)
+
+hdfs :: (Decode b, Encode a) => Text -> a -> Remote b
+hdfs = mkRemote "org.apache.hadoop.hdfs.protocol.ClientProtocol" 1
+
+getListing :: FilePath -> Remote (Maybe DirectoryListing)
+getListing path = get lsDirList <$> hdfs "getListing" GetListingRequest
+    { lsSrc          = putField (T.pack path')
+    , lsStartAfter   = putField ""
+    , lsNeedLocation = putField False
+    }
   where
-    throwLeft (Left err) = liftIO (throwIO err)
-    throwLeft (Right x)  = return x
+    -- TODO Move current directory to a config file
+    path' = if "/" `isPrefixOf` path
+            then path
+            else currentDir </> path
 
+getFileInfo :: FilePath -> Remote (Maybe FileStatus)
+getFileInfo path = get fiFileStatus <$> hdfs "getFileInfo" GetFileInfoRequest
+    { fiSrc = putField (T.pack path)
+    }
+
+getContentSummary :: FilePath -> Remote ContentSummary
+getContentSummary path = get csSummary <$> hdfs "getContentSummary" GetContentSummaryRequest
+    { csPath = putField (T.pack path)
+    }
+
+mkdirs :: FilePath -> CreateParent -> Remote Bool
+mkdirs path createParent = get mdResult <$> hdfs "mkdirs" MkdirsRequest
+    { mdSrc          = putField (T.pack path)
+    , mdMasked       = putField (FilePermission (putField 0o755))
+    , mdCreateParent = putField createParent
+    }
+
+delete :: FilePath -> Recursive -> Remote Bool
+delete path recursive = get dlResult <$> hdfs "delete" DeleteRequest
+    { dlSrc       = putField (T.pack path)
+    , dlRecursive = putField recursive
+    }
+
+------------------------------------------------------------------------
+
+login :: Text -> ConduitM ByteString ByteString IO ()
+login user = sourcePut (putContext context)
+  where
     context = IpcConnectionContext
-        { ctxProtocol = putField (Just (rpcProtocolName rpc))
+        { ctxProtocol = putField (Just "hadoop-hs")
         , ctxUserInfo = putField (Just UserInformation
             { effectiveUser = putField (Just user)
             , realUser      = mempty
             })
         }
+
+invoke :: RemoteCall a -> ConduitM ByteString ByteString IO a
+invoke rpc = do
+    sourcePut (putRequest header request)
+    header <- sinkGet decodeLengthPrefixedMessage
+    case get rspStatus header of
+      Success -> sinkGet (rpcDecode rpc <$> getResponse) >>= throwLeft
+      _       -> sinkGet getError >>= liftIO . throwIO
+  where
+    throwLeft (Left err) = liftIO (throwIO err)
+    throwLeft (Right x)  = return x
 
     header = RpcRequestHeader
         { reqKind       = putField (Just ProtocolBuffer)
@@ -210,78 +300,32 @@ sudo user rpc = do
 
 ------------------------------------------------------------------------
 
-data RpcError = RpcError Text Text
-    deriving (Show, Eq, Data, Typeable)
-
-instance Exception RpcError
-
-------------------------------------------------------------------------
-
-data Remote a = Remote
-    { rpcProtocolName    :: Text
-    , rpcProtocolVersion :: Word64
-    , rpcMethodName      :: Text
-    , rpcBytes           :: ByteString
-    , rpcDecode          :: ByteString -> Either RpcError a
-    }
-
-rpc :: (Decode b, Encode a) => Text -> Word64 -> Text -> a -> Remote b
-rpc protocol ver method arg = Remote protocol ver method (toBytes arg) fromBytes
-
-hdfs :: (Decode b, Encode a) => Text -> a -> Remote b
-hdfs = rpc "org.apache.hadoop.hdfs.protocol.ClientProtocol" 1
-
-getListing :: FilePath -> Remote GetListingResponse
-getListing path = hdfs "getListing" GetListingRequest
-    { glSrc          = putField (T.pack path')
-    , glStartAfter   = putField ""
-    , glNeedLocation = putField False
-    }
-  where
-    -- TODO Move current directory to a config file
-    path' = if "/" `isPrefixOf` path
-            then path
-            else currentDir </> path
-
-mkdirs :: FilePath -> Bool -> Remote MkdirsResponse
-mkdirs path createParent = hdfs "mkdirs" MkdirsRequest
-    { mdSrc          = putField (T.pack path)
-    , mdMasked       = putField (FilePermission (putField 0o755))
-    , mdCreateParent = putField createParent
-    }
-
-delete :: FilePath -> Bool -> Remote DeleteResponse
-delete path recursive = hdfs "delete" DeleteRequest
-    { dlSrc       = putField (T.pack path)
-    , dlRecursive = putField recursive
-    }
-
-------------------------------------------------------------------------
-
 -- hadoop-2.1.0-beta is on version 9
 -- see https://issues.apache.org/jira/browse/HADOOP-8990 for differences
 
-putRequest :: IpcConnectionContext -> RpcRequestHeader -> RpcRequest -> Put
-putRequest ctx hdr req = do
+putContext :: IpcConnectionContext -> Put
+putContext ctx = do
     putByteString "hrpc"
     putWord8 7  -- version
     putWord8 80 -- auth method (80 = simple, 81 = kerberos/gssapi, 82 = token/digest-md5)
     putWord8 0  -- ipc serialization type (0 = protobuf)
-
     putBlob (toBytes ctx)
-    putBlob (toLPBytes hdr <> toLPBytes req)
-  where
-    putBlob bs = do
-        putWord32be (fromIntegral (B.length bs))
-        putByteString bs
+
+putRequest :: RpcRequestHeader -> RpcRequest -> Put
+putRequest hdr req = putBlob (toLPBytes hdr <> toLPBytes req)
+
+putBlob :: ByteString -> Put
+putBlob bs = do
+    putWord32be (fromIntegral (B.length bs))
+    putByteString bs
 
 getResponse :: Get ByteString
 getResponse = do
     n <- fromIntegral <$> getWord32be
     getByteString n
 
-getError :: Get RpcError
-getError = RpcError <$> getText <*> getText
+getError :: Get RemoteError
+getError = RemoteError <$> getText <*> getText
   where
     getText = do
         n <- fromIntegral <$> getWord32be
@@ -293,11 +337,11 @@ toBytes = runPut . encodeMessage
 toLPBytes :: Encode a => a -> ByteString
 toLPBytes = runPut . encodeLengthPrefixedMessage
 
-fromBytes :: Decode a => ByteString -> Either RpcError a
+fromBytes :: Decode a => ByteString -> Either RemoteError a
 fromBytes bs = case runGetState decodeMessage bs 0 of
-    Left err      -> Left (RpcError "fromBytes" (T.pack err))
+    Left err      -> Left (RemoteError "fromBytes" (T.pack err))
     Right (x, "") -> Right x
-    Right (_, _)  -> Left (RpcError "fromBytes" "decoded response but did not consume enough bytes")
+    Right (_, _)  -> Left (RemoteError "fromBytes" "decoded response but did not consume enough bytes")
 
 ------------------------------------------------------------------------
 
