@@ -2,7 +2,7 @@
 
 module Main (main) where
 
-import           Control.Exception (handle)
+import           Control.Exception (handle, throwIO)
 import           Control.Monad
 import           Control.Monad.IO.Class (liftIO)
 
@@ -29,6 +29,7 @@ import           System.IO.Unsafe (unsafePerformIO)
 import           System.Locale (defaultTimeLocale)
 import           Text.PrettyPrint.Boxes hiding ((<>))
 
+import           Data.Conduit (handleC)
 import           Data.ProtocolBuffers
 import           Data.ProtocolBuffers.Orphans ()
 
@@ -46,8 +47,6 @@ main = do
   where
     optsParser = info (helper <*> options)
                       (fullDesc <> header "hh - Blazing fast interaction with HDFS")
-
-    printError (RemoteError subject body) = T.putStrLn subject >> T.putStrLn body
 
 runRemote :: Remote a -> IO a
 runRemote remote = case socksProxy of
@@ -197,13 +196,16 @@ printDiskUsage path = do
       Nothing -> liftIO $ putStrLn $ "File/directory does not exist: " <> path
       Just ls -> do
         let files = map (getPath path) (get dlPartialListing ls)
-        css <- zip files <$> mapM getContentSummary files
+        css <- zip files <$> mapM getDirSize files
 
         let col a f = vcat a (map (text . f) css)
 
         liftIO $ do
-            printBox $ col right (formatSize . get csLength . snd)
+            printBox $ col right snd
                    <+> col left  fst
+  where
+    getDirSize f = handleC (\e -> if isAccessDenied e then return "-" else liftIO (throwIO e))
+                           (formatSize . get csLength <$> getContentSummary f)
 
 printListing :: FilePath -> Remote ()
 printListing path = do
@@ -272,3 +274,16 @@ formatPerms perms = format (perms `shiftR` 6)
 
     conv bit rep p | (p .&. bit) /= 0 = rep
                    | otherwise        = "-"
+
+------------------------------------------------------------------------
+
+printError :: RemoteError -> IO ()
+printError (RemoteError subject body)
+    | oneLiner  = T.putStrLn firstLine
+    | otherwise = T.putStrLn subject >> T.putStrLn body
+  where
+    oneLiner  = subject `elem` [ "org.apache.hadoop.security.AccessControlException" ]
+    firstLine = T.takeWhile (/= '\n') body
+
+isAccessDenied :: RemoteError -> Bool
+isAccessDenied (RemoteError s _) = s == "org.apache.hadoop.security.AccessControlException"
