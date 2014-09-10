@@ -2,29 +2,28 @@
 
 module Main (main) where
 
-import           Control.Exception (handle, throwIO)
+import           Control.Exception (SomeException, handle, throwIO)
 import           Control.Monad
-import           Control.Monad.IO.Class (liftIO)
+import           Control.Monad.IO.Class (MonadIO, liftIO)
 
 import           Data.Bits ((.&.), shiftR)
 import qualified Data.ByteString.Char8 as B
-import qualified Data.HashMap.Strict as H
 import           Data.List (intercalate)
 import           Data.List (isPrefixOf)
 import           Data.List.Split (splitOn)
 import           Data.Maybe (fromMaybe, maybeToList)
-import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
-import qualified Data.Text.Read as T
 import           Data.Time
 import           Data.Time.Clock.POSIX
 import           Data.Word (Word16, Word32, Word64)
 
-import           Data.Ini
+import qualified Data.Configurator as C
+import           Data.Configurator.Types (Worth(..), Config)
+import           System.Directory (doesFileExist)
 import           System.Environment (getEnv)
-import           System.FilePath
+import           System.FilePath.Posix
 import           System.IO.Unsafe (unsafePerformIO)
 import           System.Locale (defaultTimeLocale)
 import           Text.PrettyPrint.Boxes hiding ((<>))
@@ -49,19 +48,25 @@ main = do
                       (fullDesc <> header "hh - Blazing fast interaction with HDFS")
 
 runRemote :: Remote a -> IO a
-runRemote remote = case socksProxy of
-    Nothing -> runTcp remote' nameNode
-    Just sp -> runSocks remote' sp nameNode
+runRemote remote = do
+    cfg      <- loadConfig
+    user     <- C.require cfg "hdfs.user"
+    nameNode <- lookupNameNode cfg
+    proxy    <- lookupProxy cfg
+
+    let run = maybe runTcp runSocks proxy
+    run nameNode user remote
   where
-    remote' = login username >> remote
+    lookupNameNode cfg = Endpoint <$> C.require cfg "namenode.host"
+                                  <*> C.lookupDefault 8020 cfg "namenode.port"
+
+    lookupProxy cfg = do
+        mhost <- C.lookup cfg "proxy.host"
+        case mhost of
+            Nothing   -> return Nothing
+            Just host -> Just . Endpoint host <$> C.lookupDefault 1080 cfg "proxy.port"
 
 ------------------------------------------------------------------------
-
--- TODO: Fix this unsafe mess :) it's not that unsafe but it's also not nice.
-
-fromEither :: String -> Either String a -> a
-fromEither prefix (Left err) = error (prefix <> ": " <> err)
-fromEither _      (Right x)  = x
 
 configPath :: FilePath
 configPath = unsafePerformIO $ do
@@ -69,38 +74,49 @@ configPath = unsafePerformIO $ do
     return (home </> ".hh")
 {-# NOINLINE configPath #-}
 
-config :: Ini
-config = unsafePerformIO $ fromEither configPath <$> readIniFile configPath
-{-# NOINLINE config #-}
+loadConfig :: IO Config
+loadConfig = do
+    exists <- doesFileExist configPath
+    unless exists $ do
+        putStrLn $ "Created " <> configPath <> " with defaults"
+        T.writeFile configPath defaultConfig
+    C.load [Required configPath]
+  where
+    defaultConfig = T.unlines
+        [ "hdfs {"
+        , "  user = \"guest\""
+        , "}"
+        , "namenode {"
+        , "  host = \"namenode-hostname\""
+        , "}"
+        ]
 
-socksProxy :: Maybe SocksProxy
-socksProxy = either (const Nothing) Just $ do
-    host <- lookupValue "socks-proxy" "host" config
-    port <- readValue "socks-proxy" "port" T.decimal config
-    return (Endpoint host port)
+------------------------------------------------------------------------
 
-nameNode :: NameNode
-nameNode = fromEither configPath $ do
-    host <- lookupValue "namenode" "host" config
-    port <- readValue "namenode" "port" T.decimal config
-    return (Endpoint host port)
+workingDirConfigPath :: FilePath
+workingDirConfigPath = unsafePerformIO $ do
+    home <- getEnv "HOME"
+    return (home </> ".hhwd")
+{-# NOINLINE workingDirConfigPath #-}
 
-username :: Text
-username = fromEither configPath (lookupValue "hdfs" "username" config)
+getWorkingDir :: MonadIO m => m FilePath
+getWorkingDir = liftIO $ handle onError
+                       $ T.unpack . T.takeWhile (/= '\n')
+                     <$> T.readFile workingDirConfigPath
+  where
+    onError :: SomeException -> IO FilePath
+    onError _ = return "/"
 
-currentDir :: FilePath
-currentDir = fromEither configPath (T.unpack <$> lookupValue "hdfs" "current-dir" config)
+setWorkingDir :: MonadIO m => FilePath -> m ()
+setWorkingDir path = liftIO $ T.writeFile workingDirConfigPath
+                            $ T.pack path <> "\n"
 
-setCurrentDir :: FilePath -> IO ()
-setCurrentDir path = do
-    (Ini ini) <- fromEither configPath <$> readIniFile configPath
-    let absPath = T.pack (getAbsolute path)
-        ini' = H.adjust (H.insert "current-dir" absPath) "hdfs" ini
-    writeIniFile configPath (Ini ini')
-
-getAbsolute :: FilePath -> FilePath
-getAbsolute path | isPrefixOf "/" path = normalizePath path
-                 | otherwise           = normalizePath (currentDir </> path)
+getAbsolute :: MonadIO m => FilePath -> m FilePath
+getAbsolute path = liftIO (normalizePath <$> getPath)
+  where
+    getPath = if "/" `isPrefixOf` path
+              then return path
+              else getWorkingDir >>= \pwd -> return (pwd </> path)
 
 normalizePath :: FilePath -> FilePath
 normalizePath = intercalate "/" . dropAbsParentDir . splitOn "/"
@@ -118,18 +134,18 @@ dropAbsParentDir (p : ps) = p : (reverse $ fst $ go [] ps)
 
 app :: Command -> Remote ()
 app cmd = case cmd of
-    List path      -> printListing $ getAbsolute $ maybe "" id path
-    DiskUsage path -> printDiskUsage $ getAbsolute $ maybe "" id path
+    Pwd            -> liftIO . putStrLn =<< getWorkingDir
+    ChDir     path -> setWorkingDir  =<< getAbsolute path
+    List      path -> printListing   =<< getAbsolute (maybe "" id path)
+    DiskUsage path -> printDiskUsage =<< getAbsolute (maybe "" id path)
 
-    Chdir path -> liftIO (setCurrentDir path)
-
-    Mkdir path parent -> do
-      let absPath = getAbsolute path
+    MkDir path parent -> do
+      absPath <- getAbsolute path
       ok <- mkdirs absPath parent
       unless ok $ puts $ "Failed to create: " <> absPath
 
     Remove path recursive -> do
-      let absPath = getAbsolute path
+      absPath <- getAbsolute path
       ok <- delete absPath recursive
       unless ok $ puts $ "Failed to remove: " <> absPath
   where
@@ -137,25 +153,29 @@ app cmd = case cmd of
 
 ------------------------------------------------------------------------
 
-data Command = List (Maybe FilePath)
+data Command = Pwd
+             | ChDir FilePath
+             | List (Maybe FilePath)
              | DiskUsage (Maybe FilePath)
-             | Chdir FilePath
-             | Mkdir FilePath CreateParent
+             | MkDir FilePath CreateParent
              | Remove FilePath Recursive
 
 -- how the amount of space, in bytes, used by the files
 options :: Parser Command
-options = subparser $ command "ls"    (info ls    $ progDesc "List the contents of a directory")
+options = subparser $ command "pwd"   (info pwd   $ progDesc "Print working directory")
+                   <> command "cd"    (info chdir $ progDesc "Change working directory")
+                   <> command "ls"    (info ls    $ progDesc "List the contents of a directory")
                    <> command "du"    (info du    $ progDesc "Show the amount of space used by file or directory")
-                   <> command "cd"    (info chdir $ progDesc "Change the current directory")
                    <> command "mkdir" (info mkdir $ progDesc "Create a directory in the specified location")
                    <> command "rm"    (info rm    $ progDesc "Delete a file or directory")
   where
+    pwd = pure Pwd
+
     ls = List      <$> optional (argument str (dir  <> help "the directory to list"))
     du = DiskUsage <$> optional (argument str (path <> help "the file/directory to check the usage of"))
 
-    chdir = Chdir     <$> argument str (dir       <> help "the directory to change to")
-    mkdir = Mkdir     <$> argument str (dir       <> help "the directory to create")
+    chdir = ChDir     <$> argument str (dir       <> help "the directory to change to")
+    mkdir = MkDir     <$> argument str (dir       <> help "the directory to create")
                       <*> switch       (short 'p' <> help "create intermediate directories")
     rm    = Remove    <$> argument str (path      <> help "the file/directory to remove")
                       <*> switch       (short 'r' <> help "recursively remove the whole file hierarchy")
@@ -166,10 +186,10 @@ options = subparser $ command "ls"    (info ls    $ progDesc "List the contents 
 fileCompletion :: (FileType -> Bool) -> Completer
 fileCompletion p = mkCompleter $ \path -> handle ignore $ runRemote $ do
     let (dir, _) = splitFileName' path
-    ls <- getListing (getAbsolute dir)
+    ls <- getListing =<< getAbsolute dir
 
     return $ filter (path `isPrefixOf`)
-           . map (getPath dir)
+           . map (displayPath dir)
            . filter (p . get fsFileType)
            . concatMap (get dlPartialListing)
            . maybeToList  $ ls
@@ -180,8 +200,8 @@ fileCompletion p = mkCompleter $ \path -> handle ignore $ runRemote $ do
         ("./", f) -> ("", f)
         (d, f)    -> (d, f)
 
-getPath :: FilePath -> FileStatus -> FilePath
-getPath parent file = parent </> B.unpack (get fsPath file) <> suffix
+displayPath :: FilePath -> FileStatus -> FilePath
+displayPath parent file = parent </> B.unpack (get fsPath file) <> suffix
   where
     suffix = case get fsFileType file of
         Dir -> "/"
@@ -195,7 +215,7 @@ printDiskUsage path = do
     case mls of
       Nothing -> liftIO $ putStrLn $ "File/directory does not exist: " <> path
       Just ls -> do
-        let files = map (getPath path) (get dlPartialListing ls)
+        let files = map (displayPath path) (get dlPartialListing ls)
         css <- zip files <$> mapM getDirSize files
 
         let col a f = vcat a (map (text . f) css)

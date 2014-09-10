@@ -8,6 +8,7 @@ module Hadoop.Rpc
     , NameNode
     , SocksProxy
     , Endpoint(..)
+    , User
     , HostName
     , Port
 
@@ -18,7 +19,6 @@ module Hadoop.Rpc
     , CreateParent
     , Recursive
 
-    , login
     , getListing
     , getFileInfo
     , getContentSummary
@@ -81,8 +81,9 @@ type Recursive = Bool
 
 ------------------------------------------------------------------------
 
+type User     = Text
 type HostName = Text
-type Port = Int
+type Port     = Int
 
 type NameNode   = Endpoint
 type SocksProxy = Endpoint
@@ -94,15 +95,15 @@ data Endpoint = Endpoint
 
 ------------------------------------------------------------------------
 
-runTcp :: Remote a -> NameNode -> IO a
-runTcp remote nameNode = connect host port (runSocket remote . fst)
+runTcp :: NameNode -> User -> Remote a -> IO a
+runTcp nameNode user remote = connect host port (\(s,_) -> runSocket s user remote)
   where
     host = T.unpack (epHost nameNode)
     port = show (epPort nameNode)
 
-runSocks :: Remote a -> SocksProxy -> NameNode -> IO a
-runSocks remote proxy nameNode =
-    bracket (socksConnectWith proxyConf host port) closeSock (runSocket remote)
+runSocks :: SocksProxy -> NameNode -> User -> Remote a -> IO a
+runSocks proxy nameNode user remote =
+    bracket (socksConnectWith proxyConf host port) closeSock (\s -> runSocket s user remote)
   where
     proxyConf = defaultSocksConf (T.unpack $ epHost proxy)
                                  (fromIntegral $ epPort proxy)
@@ -110,10 +111,11 @@ runSocks remote proxy nameNode =
     host = T.unpack (epHost nameNode)
     port = PortNumber (fromIntegral $ epPort nameNode)
 
-runSocket :: Remote a -> Socket -> IO a
-runSocket remote sock = do
+runSocket :: Socket -> User -> Remote a -> IO a
+runSocket sock user remote = do
+    -- TODO Must be a better way to do this
     ref <- newIORef (error "_|_")
-    let runWrite = remote >>= liftIO . atomicWriteIORef ref
+    let runWrite = login user >> remote >>= liftIO . atomicWriteIORef ref
     sourceSocket sock =$= runWrite $$ sinkSocket sock
     readIORef ref
 
@@ -157,7 +159,7 @@ delete path recursive = get dlResult <$> hdfs "delete" DeleteRequest
 
 ------------------------------------------------------------------------
 
-login :: Text -> Remote ()
+login :: User -> Remote ()
 login user = sourcePut (putContext context)
   where
     context = IpcConnectionContext
