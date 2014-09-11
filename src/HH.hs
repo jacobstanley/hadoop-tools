@@ -57,8 +57,6 @@ runRemote remote = do
     nameNode   <- getNameNode
     socksProxy <- getSocksProxy
 
-    print (hdfsUser, nameNode, socksProxy)
-
     let run = maybe runTcp runSocks socksProxy
     run nameNode hdfsUser remote
 
