@@ -17,27 +17,29 @@ executable hh
   hs-source-dirs: src
 
   build-depends:
-      base                 == 4.7.*
-    , boxes                == 0.1.*
-    , bytestring           == 0.10.*
-    , cereal               == 0.4.*
-    , cereal-conduit       == 0.7.*
-    , conduit              == 1.2.*
-    , conduit-extra        == 1.1.*
-    , configurator         == 0.3.*
-    , directory            == 1.2.*
-    , filepath             == 1.3.*
+      base                 >= 4.7
+    , boxes                >= 0.1
+    , bytestring           >= 0.10
+    , cereal               >= 0.4
+    , cereal-conduit       >= 0.7
+    , conduit              >= 1.2
+    , conduit-extra        >= 1.1
+    , configurator         >= 0.3
+    , directory            >= 1.2
+    , filepath             >= 1.3
     , network              >= 2.5
-    , network-simple       == 0.4.*
-    , old-locale           == 1.0.*
-    , optparse-applicative == 0.10.*
+    , network-simple       >= 0.4
+    , old-locale           >= 1.0
+    , optparse-applicative >= 0.10
     , protobuf             >= 0.2.0.4
-    , socks                == 0.5.*
-    , split                == 0.2.*
-    , text                 == 1.1.*
-    , time                 == 1.4.*
-    , transformers         == 0.4.*
-    , unordered-containers == 0.2.*
+    , socks                >= 0.5
+    , split                >= 0.2
+    , text                 >= 1.1
+    , time                 >= 1.4
+    , transformers         >= 0.4
+    , unix                 >= 2.7
+    , unordered-containers >= 0.2
+    , xmlhtml              >= 0.2.3.2
 
     -- Required by SeqView.hs
     --, binary               >= 0.7.2 && < 0.8

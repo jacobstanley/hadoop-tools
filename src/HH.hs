@@ -8,25 +8,29 @@ import           Control.Monad.IO.Class (MonadIO, liftIO)
 
 import           Data.Bits ((.&.), shiftR)
 import qualified Data.ByteString.Char8 as B
+import qualified Data.HashMap.Lazy as H
 import           Data.List (intercalate)
 import           Data.List (isPrefixOf)
 import           Data.List.Split (splitOn)
-import           Data.Maybe (fromMaybe, maybeToList)
+import           Data.Maybe (fromMaybe, maybeToList, mapMaybe, listToMaybe)
+import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
+import qualified Data.Text.Read as T
 import           Data.Time
 import           Data.Time.Clock.POSIX
 import           Data.Word (Word16, Word32, Word64)
 
 import qualified Data.Configurator as C
-import           Data.Configurator.Types (Worth(..), Config)
-import           System.Directory (doesFileExist)
-import           System.Environment (getEnv)
+import           Data.Configurator.Types (Worth(..))
+import           System.Environment (getEnv, lookupEnv)
 import           System.FilePath.Posix
 import           System.IO.Unsafe (unsafePerformIO)
 import           System.Locale (defaultTimeLocale)
+import           System.Posix.User (getEffectiveUserName)
 import           Text.PrettyPrint.Boxes hiding ((<>))
+import           Text.XmlHtml
 
 import           Data.Conduit (handleC)
 import           Data.ProtocolBuffers
@@ -49,22 +53,14 @@ main = do
 
 runRemote :: Remote a -> IO a
 runRemote remote = do
-    cfg      <- loadConfig
-    user     <- C.require cfg "hdfs.user"
-    nameNode <- lookupNameNode cfg
-    proxy    <- lookupProxy cfg
+    hdfsUser   <- getHdfsUser
+    nameNode   <- getNameNode
+    socksProxy <- getSocksProxy
 
-    let run = maybe runTcp runSocks proxy
-    run nameNode user remote
-  where
-    lookupNameNode cfg = Endpoint <$> C.require cfg "namenode.host"
-                                  <*> C.lookupDefault 8020 cfg "namenode.port"
+    print (hdfsUser, nameNode, socksProxy)
 
-    lookupProxy cfg = do
-        mhost <- C.lookup cfg "proxy.host"
-        case mhost of
-            Nothing   -> return Nothing
-            Just host -> Just . Endpoint host <$> C.lookupDefault 1080 cfg "proxy.port"
+    let run = maybe runTcp runSocks socksProxy
+    run nameNode hdfsUser remote
 
 ------------------------------------------------------------------------
 
@@ -74,22 +70,99 @@ configPath = unsafePerformIO $ do
     return (home </> ".hh")
 {-# NOINLINE configPath #-}
 
-loadConfig :: IO Config
-loadConfig = do
-    exists <- doesFileExist configPath
-    unless exists $ do
-        putStrLn $ "Created " <> configPath <> " with defaults"
-        T.writeFile configPath defaultConfig
-    C.load [Required configPath]
+getHdfsUser :: IO User
+getHdfsUser = attempt [fromEnv, fromCfg] fromUnix
   where
-    defaultConfig = T.unlines
-        [ "hdfs {"
-        , "  user = \"guest\""
-        , "}"
-        , "namenode {"
-        , "  host = \"namenode-hostname\""
-        , "}"
-        ]
+    fromEnv :: IO (Maybe User)
+    fromEnv  = fmap T.pack <$> lookupEnv "HADOOP_USER_NAME"
+
+    fromCfg :: IO (Maybe User)
+    fromCfg  = C.load [Optional configPath] >>= flip C.lookup "hdfs.user"
+
+    fromUnix :: IO User
+    fromUnix = T.pack <$> getEffectiveUserName
+
+getNameNode :: IO NameNode
+getNameNode = attempt [fromHadoopCfg, fromUserCfg] explode
+  where
+    fromHadoopCfg :: IO (Maybe NameNode)
+    fromHadoopCfg = listToMaybe . maybe [] id <$> readHadoopNameNodes
+
+    fromUserCfg :: IO (Maybe NameNode)
+    fromUserCfg = do
+        cfg  <- C.load [Optional configPath]
+        host <- C.lookup cfg "namenode.host"
+        port <- C.lookupDefault 8020 cfg "namenode.port"
+        return (Endpoint <$> host <*> pure port)
+
+    explode :: IO a
+    explode = error $ "could not find namenode details in /etc/hadoop/conf/ or " <> configPath
+
+getSocksProxy :: IO (Maybe SocksProxy)
+getSocksProxy = do
+    cfg   <- C.load [Optional configPath]
+    mhost <- C.lookup cfg "proxy.host"
+    case mhost of
+        Nothing   -> return Nothing
+        Just host -> Just . Endpoint host <$> C.lookupDefault 1080 cfg "proxy.port"
+
+attempt :: Monad m => [m (Maybe a)] -> m a -> m a
+attempt [] def     = def
+attempt (io:ios) def = io >>= \mx -> case mx of
+    Just x  -> return x
+    Nothing -> attempt ios def
+
+------------------------------------------------------------------------
+
+type HadoopConfig = H.HashMap Text Text
+
+readHadoopNameNodes :: IO (Maybe [NameNode])
+readHadoopNameNodes = do
+    cfg <- H.union <$> readHadoopConfig "/etc/hadoop/conf/core-site.xml"
+                   <*> readHadoopConfig "/etc/hadoop/conf/hdfs-site.xml"
+    return $ resolveNameNode cfg <$> (stripProto =<< H.lookup fsDefaultNameKey cfg)
+  where
+    proto            = "hdfs://"
+    fsDefaultNameKey = "fs.defaultFS"
+    nameNodesPrefix  = "dfs.ha.namenodes."
+    rpcAddressPrefix = "dfs.namenode.rpc-address."
+
+    stripProto :: Text -> Maybe Text
+    stripProto uri | proto `T.isPrefixOf` uri = Just (T.drop (T.length proto) uri)
+                   | otherwise                = Nothing
+
+    resolveNameNode :: HadoopConfig -> Text -> [NameNode]
+    resolveNameNode cfg name = case parseEndpoint name of
+        Just ep -> [ep] -- contains "host:port" directly
+        Nothing -> mapMaybe (\nn -> lookupAddress cfg $ name <> "." <> nn)
+                            (lookupNameNodes cfg name)
+
+    lookupNameNodes :: HadoopConfig -> Text -> [Text]
+    lookupNameNodes cfg name = maybe [] id
+                             $ T.splitOn "," <$> H.lookup (nameNodesPrefix <> name) cfg
+
+    lookupAddress :: HadoopConfig -> Text -> Maybe Endpoint
+    lookupAddress cfg name = parseEndpoint =<< H.lookup (rpcAddressPrefix <> name) cfg
+
+    parseEndpoint :: Text -> Maybe Endpoint
+    parseEndpoint ep = Endpoint host <$> port
+      where
+        host = T.takeWhile (/= ':') ep
+        port = either (const Nothing) (Just . fst)
+             $ T.decimal $ T.drop (T.length host + 1) ep
+
+readHadoopConfig :: FilePath -> IO HadoopConfig
+readHadoopConfig path = do
+    exml <- parseXML path <$> B.readFile path
+    case exml of
+      Left  _   -> return H.empty
+      Right xml -> return (toHashMap (docContent xml))
+  where
+    toHashMap = H.fromList . mapMaybe fromNode
+              . concatMap (descendantElementsTag "property")
+
+    fromNode n = (,) <$> (nodeText <$> childElementTag "name" n)
+                     <*> (nodeText <$> childElementTag "value" n)
 
 ------------------------------------------------------------------------
 
