@@ -176,7 +176,7 @@ getWorkingDir = liftIO $ handle onError
                      <$> T.readFile workingDirConfigPath
   where
     onError :: SomeException -> IO FilePath
-    onError _ = return "/"
+    onError _ = (("/user" </>) . T.unpack) <$> getHdfsUser
 
 setWorkingDir :: MonadIO m => FilePath -> m ()
 setWorkingDir path = liftIO $ T.writeFile workingDirConfigPath
