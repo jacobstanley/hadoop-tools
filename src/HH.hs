@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Main (main) where
 
@@ -8,6 +9,7 @@ import           Control.Monad.IO.Class (MonadIO, liftIO)
 
 import           Data.Bits ((.&.), shiftR)
 import qualified Data.ByteString.Char8 as B
+import           Data.Foldable (foldMap)
 import qualified Data.HashMap.Lazy as H
 import           Data.List (intercalate)
 import           Data.List (isPrefixOf)
@@ -46,7 +48,7 @@ import           Options.Applicative hiding (Success)
 main :: IO ()
 main = do
     cmd <- execParser optsParser
-    handle printError (runRemote (app cmd))
+    handle printError (runRemote cmd)
   where
     optsParser = info (helper <*> options)
                       (fullDesc <> header "hh - Blazing fast interaction with HDFS")
@@ -203,56 +205,70 @@ dropAbsParentDir (p : ps) = p : (reverse $ fst $ go [] ps)
 
 ------------------------------------------------------------------------
 
-app :: Command -> Remote ()
-app cmd = case cmd of
-    Pwd            -> liftIO . putStrLn =<< getWorkingDir
-    ChDir     path -> setWorkingDir  =<< getAbsolute path
-    List      path -> printListing   =<< getAbsolute (maybe "" id path)
-    DiskUsage path -> printDiskUsage =<< getAbsolute (maybe "" id path)
+data SubCommand = SubCommand
+    { subName :: String
+    , subDescription :: String
+    , subMethod :: Parser (Remote ())
+    }
 
-    MkDir path parent -> do
+sub :: SubCommand -> Mod CommandFields (Remote ())
+sub SubCommand{..} = command subName (info subMethod $ progDesc subDescription)
+
+options :: Parser (Remote ())
+options = subparser (foldMap sub allSubCommands)
+
+allSubCommands :: [SubCommand]
+allSubCommands = [subPwd, subChDir, subList, subDiskUsage, subMkDir, subRemove]
+
+completePath = completer (fileCompletion (const True)) <> metavar "PATH"
+completeDir  = completer (fileCompletion (== Dir))     <> metavar "DIRECTORY"
+
+subPwd :: SubCommand
+subPwd = SubCommand "pwd" "Print working directory" go
+  where
+    go = pure pwd
+    pwd = liftIO . putStrLn =<< getWorkingDir
+
+subChDir :: SubCommand
+subChDir = SubCommand "cd" "Change working directory" go
+  where
+    go = cd <$> argument str (completeDir <> help "the directory to change to")
+    cd path = setWorkingDir  =<< getAbsolute path
+
+subList :: SubCommand
+subList = SubCommand "ls" "List the contents of a directory" go
+  where
+    go = ls <$> (optional (argument str (completeDir <> help "the directory to list")))
+    ls path = printListing =<< getAbsolute (fromMaybe "" path)
+
+subDiskUsage :: SubCommand
+subDiskUsage = SubCommand "du" "Show the amount of space used by file or directory" go
+  where
+    go = du <$> optional (argument str (completePath <> help "the file/directory to check the usage of"))
+    du path = printDiskUsage =<< getAbsolute (maybe "" id path)
+
+subMkDir :: SubCommand
+subMkDir = SubCommand "mkdir" "Create a directory in the specified location" go
+  where
+    go = mkdir <$> argument str (completeDir       <> help "the directory to create")
+               <*> switch       (short 'p' <> help "create intermediate directories")
+    mkdir path parent =  do
       absPath <- getAbsolute path
       ok <- mkdirs absPath parent
-      unless ok $ puts $ "Failed to create: " <> absPath
+      unless ok $ liftIO . putStrLn $ "Failed to create: " <> absPath
 
-    Remove path recursive -> do
+subRemove :: SubCommand
+subRemove = SubCommand "rm" "Delete a file or directory" go
+  where
+    go = rm <$> argument str (completePath      <> help "the file/directory to remove")
+            <*> switch       (short 'r' <> help "recursively remove the whole file hierarchy")
+    rm path recursive = do
       absPath <- getAbsolute path
       ok <- delete absPath recursive
-      unless ok $ puts $ "Failed to remove: " <> absPath
-  where
-    puts = liftIO . putStrLn
+      unless ok $ liftIO . putStrLn $ "Failed to remove: " <> absPath
+
 
 ------------------------------------------------------------------------
-
-data Command = Pwd
-             | ChDir FilePath
-             | List (Maybe FilePath)
-             | DiskUsage (Maybe FilePath)
-             | MkDir FilePath CreateParent
-             | Remove FilePath Recursive
-
--- how the amount of space, in bytes, used by the files
-options :: Parser Command
-options = subparser $ command "pwd"   (info pwd   $ progDesc "Print working directory")
-                   <> command "cd"    (info chdir $ progDesc "Change working directory")
-                   <> command "ls"    (info ls    $ progDesc "List the contents of a directory")
-                   <> command "du"    (info du    $ progDesc "Show the amount of space used by file or directory")
-                   <> command "mkdir" (info mkdir $ progDesc "Create a directory in the specified location")
-                   <> command "rm"    (info rm    $ progDesc "Delete a file or directory")
-  where
-    pwd = pure Pwd
-
-    ls = List      <$> optional (argument str (dir  <> help "the directory to list"))
-    du = DiskUsage <$> optional (argument str (path <> help "the file/directory to check the usage of"))
-
-    chdir = ChDir     <$> argument str (dir       <> help "the directory to change to")
-    mkdir = MkDir     <$> argument str (dir       <> help "the directory to create")
-                      <*> switch       (short 'p' <> help "create intermediate directories")
-    rm    = Remove    <$> argument str (path      <> help "the file/directory to remove")
-                      <*> switch       (short 'r' <> help "recursively remove the whole file hierarchy")
-
-    path = completer (fileCompletion (const True)) <> metavar "PATH"
-    dir  = completer (fileCompletion (== Dir))     <> metavar "DIRECTORY"
 
 fileCompletion :: (FileType -> Bool) -> Completer
 fileCompletion p = mkCompleter $ \path -> handle ignore $ runRemote $ do
