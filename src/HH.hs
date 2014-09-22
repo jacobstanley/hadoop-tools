@@ -218,16 +218,18 @@ options :: Parser (Remote ())
 options = subparser (foldMap sub allSubCommands)
 
 allSubCommands :: [SubCommand]
-allSubCommands = [subPwd, subChDir, subList, subDiskUsage, subMkDir, subRemove, subRename]
+allSubCommands =
+    [ subChDir
+    , subDiskUsage
+    , subList
+    , subMkDir
+    , subPwd
+    , subRemove
+    , subRename
+    ]
 
 completePath = completer (fileCompletion (const True)) <> metavar "PATH"
 completeDir  = completer (fileCompletion (== Dir))     <> metavar "DIRECTORY"
-
-subPwd :: SubCommand
-subPwd = SubCommand "pwd" "Print working directory" go
-  where
-    go = pure pwd
-    pwd = liftIO . putStrLn =<< getWorkingDir
 
 subChDir :: SubCommand
 subChDir = SubCommand "cd" "Change working directory" go
@@ -235,17 +237,17 @@ subChDir = SubCommand "cd" "Change working directory" go
     go = cd <$> argument str (completeDir <> help "the directory to change to")
     cd path = setWorkingDir  =<< getAbsolute path
 
-subList :: SubCommand
-subList = SubCommand "ls" "List the contents of a directory" go
-  where
-    go = ls <$> (optional (argument str (completeDir <> help "the directory to list")))
-    ls path = printListing =<< getAbsolute (fromMaybe "" path)
-
 subDiskUsage :: SubCommand
 subDiskUsage = SubCommand "du" "Show the amount of space used by file or directory" go
   where
     go = du <$> optional (argument str (completePath <> help "the file/directory to check the usage of"))
     du path = printDiskUsage =<< getAbsolute (maybe "" id path)
+
+subList :: SubCommand
+subList = SubCommand "ls" "List the contents of a directory" go
+  where
+    go = ls <$> (optional (argument str (completeDir <> help "the directory to list")))
+    ls path = printListing =<< getAbsolute (fromMaybe "" path)
 
 subMkDir :: SubCommand
 subMkDir = SubCommand "mkdir" "Create a directory in the specified location" go
@@ -256,6 +258,12 @@ subMkDir = SubCommand "mkdir" "Create a directory in the specified location" go
       absPath <- getAbsolute path
       ok <- mkdirs absPath parent
       unless ok $ liftIO . putStrLn $ "Failed to create: " <> absPath
+
+subPwd :: SubCommand
+subPwd = SubCommand "pwd" "Print working directory" go
+  where
+    go = pure pwd
+    pwd = liftIO . putStrLn =<< getWorkingDir
 
 subRemove :: SubCommand
 subRemove = SubCommand "rm" "Delete a file or directory" go
