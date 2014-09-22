@@ -7,9 +7,11 @@ import           Control.Exception (SomeException, bracket)
 import           Control.Monad
 import           Control.Monad.Catch (handle, throwM)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
+import qualified Data.Attoparsec.ByteString.Char8 as Atto
 import           Data.Bits ((.&.), shiftR)
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as B
+import           Data.Char (ord)
 import           Data.Foldable (foldMap)
 import           Data.Maybe (fromMaybe)
 import qualified Data.Text as T
@@ -18,7 +20,7 @@ import qualified Data.Text.IO as T
 import           Data.Time
 import           Data.Time.Clock.POSIX
 import qualified Data.Vector as V
-import           Data.Word (Word16, Word64)
+import           Data.Word (Word16, Word32, Word64)
 
 import qualified Data.Configurator as C
 import           Data.Configurator.Types (Worth(..))
@@ -159,6 +161,7 @@ allSubCommands :: [SubCommand]
 allSubCommands =
     [ subCat
     , subChDir
+    , subChMod
     , subDiskUsage
     -- , subFind
     , subGet
@@ -193,6 +196,38 @@ subChDir = SubCommand "cd" "Change working directory" go
         path <- getAbsolute =<< maybe getDefaultWorkingDir return mpath
         _ <- getListingOrFail path
         setWorkingDir path
+
+subChMod :: SubCommand
+subChMod = SubCommand "chmod" "Change permissions" go
+  where
+    go = chmod <$> argument bstr (help "permissions mode")
+               <*> argument bstr (completeDir <> help "the file/directory to chmod")
+    chmod modeS path = either
+        (\_ -> error $ "Unknown mode" ++ B.unpack modeS)
+        (\mode -> SubHdfs $ modifyPerms mode path)
+        (Atto.parseOnly parseMode modeS)
+
+    parseMode = octal
+
+    octal :: Atto.Parser Word16
+    octal = B.foldl' step 0 `fmap` Atto.takeWhile1 isDig
+      where
+        isDig w = w >= '0' && w <= '7'
+        step a w = a * 8 + fromIntegral (ord w - 48)
+
+    modifyPerms :: Word16 -> HdfsPath -> Hdfs ()
+    modifyPerms mode path = do
+        absPath <- getAbsolute path
+        info <- getFileInfo absPath
+        case info of
+            Nothing -> fail $ unwords ["No such file", B.unpack absPath]
+            Just FileStatus{..} -> do
+                {-
+                liftIO . putStrLn . unwords $ ["Setting perms on", B.unpack absPath]
+                liftIO . putStrLn . unwords $ ["OLD:", formatMode fsFileType fsPermission]
+                liftIO . putStrLn . unwords $ ["NEW:", formatMode fsFileType mode]
+                -}
+                setPermissions (fromIntegral mode) absPath
 
 subDiskUsage :: SubCommand
 subDiskUsage = SubCommand "du" "Show the amount of space used by file or directory" go

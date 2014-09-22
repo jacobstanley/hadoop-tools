@@ -25,6 +25,7 @@ executable hh
 
   build-depends:
       base                 >= 4.7 && < 5
+    , attoparsec           >= 0.12
     , boxes                >= 0.1
     , bytestring           >= 0.10
     , configurator         >= 0.3
