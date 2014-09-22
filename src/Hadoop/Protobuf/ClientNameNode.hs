@@ -95,3 +95,21 @@ data DeleteResponse = DeleteResponse
 
 instance Encode DeleteResponse
 instance Decode DeleteResponse
+
+------------------------------------------------------------------------
+
+data Rename2Request = Rename2Request
+    { mvSrc       :: Required 1 (Value Text)
+    , mvDst       :: Required 2 (Value Text)
+    , mvOverwrite :: Required 3 (Value Bool)
+    } deriving (Generic, Show)
+
+instance Encode Rename2Request
+instance Decode Rename2Request
+
+data Rename2Response = Rename2Response
+    {
+    } deriving (Generic, Show)
+
+instance Encode Rename2Response
+instance Decode Rename2Response

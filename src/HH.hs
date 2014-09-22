@@ -218,7 +218,7 @@ options :: Parser (Remote ())
 options = subparser (foldMap sub allSubCommands)
 
 allSubCommands :: [SubCommand]
-allSubCommands = [subPwd, subChDir, subList, subDiskUsage, subMkDir, subRemove]
+allSubCommands = [subPwd, subChDir, subList, subDiskUsage, subMkDir, subRemove, subRename]
 
 completePath = completer (fileCompletion (const True)) <> metavar "PATH"
 completeDir  = completer (fileCompletion (== Dir))     <> metavar "DIRECTORY"
@@ -267,6 +267,16 @@ subRemove = SubCommand "rm" "Delete a file or directory" go
       ok <- delete absPath recursive
       unless ok $ liftIO . putStrLn $ "Failed to remove: " <> absPath
 
+subRename :: SubCommand
+subRename = SubCommand "mv" "Rename a file or directory" go
+  where
+    go = mv <$> argument str (completePath      <> help "source file/directory")
+            <*> argument str (completePath      <> help "destination file/directory")
+            <*> switch       (short 'f' <> help "overwrite destination if it exists")
+    mv src dst force = do
+      absSrc <- getAbsolute src
+      absDst <- getAbsolute dst
+      rename absSrc absDst force
 
 ------------------------------------------------------------------------
 
@@ -389,7 +399,9 @@ printError (RemoteError subject body)
     | oneLiner  = T.putStrLn firstLine
     | otherwise = T.putStrLn subject >> T.putStrLn body
   where
-    oneLiner  = subject `elem` [ "org.apache.hadoop.security.AccessControlException" ]
+    oneLiner  = subject `elem` [ "org.apache.hadoop.security.AccessControlException"
+                               , "org.apache.hadoop.fs.FileAlreadyExistsException"
+                               , "java.io.FileNotFoundException" ]
     firstLine = T.takeWhile (/= '\n') body
 
 isAccessDenied :: RemoteError -> Bool

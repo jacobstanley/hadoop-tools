@@ -24,6 +24,7 @@ module Hadoop.Rpc
     , getContentSummary
     , mkdirs
     , delete
+    , rename
     ) where
 
 import           Control.Applicative ((<$>), (<*>))
@@ -78,6 +79,7 @@ instance Exception RemoteError
 
 type CreateParent = Bool
 type Recursive = Bool
+type Overwrite = Bool
 
 ------------------------------------------------------------------------
 
@@ -156,6 +158,16 @@ delete path recursive = get dlResult <$> hdfs "delete" DeleteRequest
     { dlSrc       = putField (T.pack path)
     , dlRecursive = putField recursive
     }
+
+rename :: FilePath -> FilePath -> Overwrite -> Remote ()
+rename src dst overwrite = ignore <$> hdfs "rename2" Rename2Request
+    { mvSrc       = putField (T.pack src)
+    , mvDst       = putField (T.pack dst)
+    , mvOverwrite = putField overwrite
+    }
+  where
+    ignore :: Rename2Response -> ()
+    ignore = const ()
 
 ------------------------------------------------------------------------
 
