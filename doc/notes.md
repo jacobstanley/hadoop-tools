@@ -18,3 +18,7 @@ Hadoop Notes
 ## MapTask.NewDirectOutputCollector<K, V>
 - Creates a record writer for the correct output format
 - Provides write(key, value) function for the MapTask
+
+## PacketReceiver
+- Actually does some work, receives data from data nodes
+- Has useful docs about data packet format
