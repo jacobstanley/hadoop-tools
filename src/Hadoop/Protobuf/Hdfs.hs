@@ -82,6 +82,27 @@ instance Enum FileType where
 
 ------------------------------------------------------------------------
 
+data ChecksumType =
+    ChecksumNull | ChecksumCRC32 | ChecksumCRC32C
+    deriving (Generic, Show, Eq)
+
+instance Enum ChecksumType where
+    toEnum n = case n of
+      0 -> ChecksumNull
+      1 -> ChecksumCRC32
+      2 -> ChecksumCRC32C
+      _ -> error $ "ChecksumType.toEnum: invalid enum value <" ++ show n ++ ">"
+
+    fromEnum e = case e of
+      ChecksumNull   -> 0
+      ChecksumCRC32  -> 1
+      ChecksumCRC32C -> 2
+
+instance Encode ChecksumType
+instance Decode ChecksumType
+
+------------------------------------------------------------------------
+
 -- | File or directory permission, same spec as POSIX.
 data FilePermission = FilePermission
     { fpPerm :: Required 1 (Value Word32) -- ^ actually a short, only 16 bits used
