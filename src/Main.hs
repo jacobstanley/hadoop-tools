@@ -44,7 +44,7 @@ import           Hadoop.Rpc
 import           Options.Applicative hiding (Success)
 
 import           Data.Version (showVersion)
-import           Paths_hadoop_hs (version)
+import           Paths_hadoop_tools (version)
 
 ------------------------------------------------------------------------
 

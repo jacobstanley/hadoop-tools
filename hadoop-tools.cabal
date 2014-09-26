@@ -1,4 +1,4 @@
-name:                hadoop-hs
+name:                hadoop-tools
 version:             0.2
 synopsis:            Tools for working with Hadoop.
 description:         Tools for working with Hadoop.
@@ -13,11 +13,11 @@ cabal-version:       >= 1.10
 executable hh
   default-language: Haskell2010
 
-  main-is: HH.hs
+  main-is: Main.hs
   hs-source-dirs: src
 
   other-modules:
-    Paths_hadoop_hs
+    Paths_hadoop_tools
 
   build-depends:
       base                 >= 4.7
@@ -43,11 +43,3 @@ executable hh
     , unix                 >= 2.7
     , unordered-containers >= 0.2
     , xmlhtml              >= 0.2.3.2
-
-    -- Required by SeqView.hs
-    --, binary               >= 0.7.2 && < 0.8
-    --, monad-loops          == 0.4.*
-    --, pipes                == 4.1.*
-    --, pipes-bytestring     == 2.1.*
-    --, snappy               == 0.2.*
-    --, vector               == 0.10.*
