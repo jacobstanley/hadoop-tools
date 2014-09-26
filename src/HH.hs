@@ -228,8 +228,11 @@ allSubCommands =
     , subRename
     ]
 
+completePath :: Mod ArgumentFields a
 completePath = completer (fileCompletion (const True)) <> metavar "PATH"
-completeDir  = completer (fileCompletion (== Dir))     <> metavar "DIRECTORY"
+
+completeDir :: Mod ArgumentFields a
+completeDir  = completer (fileCompletion (== Dir)) <> metavar "DIRECTORY"
 
 subChDir :: SubCommand
 subChDir = SubCommand "cd" "Change working directory" go
