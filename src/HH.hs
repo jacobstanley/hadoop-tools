@@ -172,13 +172,16 @@ workingDirConfigPath = unsafePerformIO $ do
     return (home </> ".hhwd")
 {-# NOINLINE workingDirConfigPath #-}
 
+getDefaultWorkingDir :: MonadIO m => m FilePath
+getDefaultWorkingDir = liftIO $ (("/user" </>) . T.unpack) <$> getHdfsUser
+
 getWorkingDir :: MonadIO m => m FilePath
 getWorkingDir = liftIO $ handle onError
                        $ T.unpack . T.takeWhile (/= '\n')
                      <$> T.readFile workingDirConfigPath
   where
     onError :: SomeException -> IO FilePath
-    onError _ = (("/user" </>) . T.unpack) <$> getHdfsUser
+    onError = const getDefaultWorkingDir
 
 setWorkingDir :: MonadIO m => FilePath -> m ()
 setWorkingDir path = liftIO $ T.writeFile workingDirConfigPath
@@ -237,8 +240,13 @@ completeDir  = completer (fileCompletion (== Dir)) <> metavar "DIRECTORY"
 subChDir :: SubCommand
 subChDir = SubCommand "cd" "Change working directory" go
   where
-    go = cd <$> argument str (completeDir <> help "the directory to change to")
-    cd path = setWorkingDir  =<< getAbsolute path
+    go = cd <$> optional (argument str (completeDir <> help "the directory to change to"))
+    cd mpath = do
+        path <- getAbsolute =<< maybe getDefaultWorkingDir return mpath
+        mls <- getListing path
+        liftIO $ case mls of
+            Nothing -> putStrLn $ "Directory does not exist: " <> path
+            Just _  -> setWorkingDir path
 
 subDiskUsage :: SubCommand
 subDiskUsage = SubCommand "du" "Show the amount of space used by file or directory" go
