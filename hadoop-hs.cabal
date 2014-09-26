@@ -16,6 +16,9 @@ executable hh
   main-is: HH.hs
   hs-source-dirs: src
 
+  other-modules:
+    Paths_hadoop_hs
+
   build-depends:
       base                 >= 4.7
     , boxes                >= 0.1

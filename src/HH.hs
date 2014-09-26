@@ -43,6 +43,9 @@ import           Hadoop.Rpc
 
 import           Options.Applicative hiding (Success)
 
+import           Data.Version (showVersion)
+import           Paths_hadoop_hs (version)
+
 ------------------------------------------------------------------------
 
 main :: IO ()
@@ -229,6 +232,7 @@ allSubCommands =
     , subPwd
     , subRemove
     , subRename
+    , subVersion
     ]
 
 completePath :: Mod ArgumentFields a
@@ -296,6 +300,11 @@ subRename = SubCommand "mv" "Rename a file or directory" go
       absSrc <- getAbsolute src
       absDst <- getAbsolute dst
       rename absSrc absDst force
+
+subVersion :: SubCommand
+subVersion = SubCommand "version" "Show version information" go
+  where
+    go = pure $ liftIO $ putStrLn $ "hh version " <> showVersion version
 
 ------------------------------------------------------------------------
 
