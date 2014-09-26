@@ -1,5 +1,5 @@
 name:                hadoop-hs
-version:             0.1.0.0
+version:             0.2
 synopsis:            Tools for working with Hadoop.
 description:         Tools for working with Hadoop.
 license:             Apache-2.0
