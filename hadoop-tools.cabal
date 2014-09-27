@@ -1,14 +1,15 @@
-name:                hadoop-tools
-version:             0.2
-synopsis:            Tools for working with Hadoop.
-description:         Tools for working with Hadoop.
-license:             Apache-2.0
-license-file:        LICENSE
-author:              Jacob Stanley, Conrad Parker
-maintainer:          Jacob Stanley <jacob@stanley.io>
-category:            Data
-build-type:          Simple
-cabal-version:       >= 1.10
+name:          hadoop-tools
+version:       0.2
+synopsis:      Tools for working with Hadoop.
+description:   Tools for working with Hadoop.
+homepage:      http://github.com/jystic/hadoop-tools
+license:       Apache-2.0
+license-file:  LICENSE
+author:        Jacob Stanley, Conrad Parker
+maintainer:    Jacob Stanley <jacob@stanley.io>
+category:      Data
+build-type:    Simple
+cabal-version: >= 1.10
 
 executable hh
   default-language: Haskell2010
