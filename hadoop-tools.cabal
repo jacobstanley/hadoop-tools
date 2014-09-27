@@ -1,7 +1,7 @@
 name:          hadoop-tools
 version:       0.2
-synopsis:      Tools for working with Hadoop.
-description:   Tools for working with Hadoop.
+synopsis:      Fast command line tools for working with Hadoop.
+description:   Fast command line tools for working with Hadoop.
 homepage:      http://github.com/jystic/hadoop-tools
 license:       Apache-2.0
 license-file:  LICENSE
