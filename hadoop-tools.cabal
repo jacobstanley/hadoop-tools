@@ -4,8 +4,8 @@ synopsis:            Tools for working with Hadoop.
 description:         Tools for working with Hadoop.
 license:             Apache-2.0
 license-file:        LICENSE
-author:              Jacob Stanley
-maintainer:          jacob@stanley.io
+author:              Jacob Stanley, Conrad Parker
+maintainer:          Jacob Stanley <jacob@stanley.io>
 category:            Data
 build-type:          Simple
 cabal-version:       >= 1.10
