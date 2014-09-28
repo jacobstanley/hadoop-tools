@@ -156,7 +156,7 @@ readHadoopNameNodes = do
 
 readHadoopConfig :: FilePath -> IO HadoopConfig
 readHadoopConfig path = do
-    exml <- parseXML path <$> B.readFile path
+    exml <- parseXML path <$> handle onError (B.readFile path)
     case exml of
       Left  _   -> return H.empty
       Right xml -> return (toHashMap (docContent xml))
@@ -166,6 +166,9 @@ readHadoopConfig path = do
 
     fromNode n = (,) <$> (nodeText <$> childElementTag "name" n)
                      <*> (nodeText <$> childElementTag "value" n)
+
+    onError :: SomeException -> IO B.ByteString
+    onError = const (return "")
 
 ------------------------------------------------------------------------
 

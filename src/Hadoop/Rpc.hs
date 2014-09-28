@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Hadoop.Rpc
     ( Remote
@@ -27,20 +28,23 @@ module Hadoop.Rpc
     , rename
     ) where
 
-import           Control.Applicative ((<$>), (<*>))
+import           Control.Applicative ((<$>))
 import           Control.Exception (Exception, bracket, throwIO)
 import           Control.Monad.IO.Class (liftIO)
 
 import           Data.ByteString (ByteString)
-import qualified Data.ByteString.Char8 as B
+import qualified Data.ByteString.Lazy as L
 import           Data.Data (Data)
 import           Data.IORef
+import           Data.Maybe (fromMaybe)
 import           Data.Monoid ((<>), mempty)
 import           Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
 import           Data.Typeable (Typeable)
+import qualified Data.UUID as UUID
 import           Data.Word (Word64)
+import           System.IO.Unsafe (unsafePerformIO)
+import           System.Random (randomIO)
 
 import           Data.ProtocolBuffers
 import           Data.ProtocolBuffers.Orphans ()
@@ -124,7 +128,8 @@ runSocket sock user remote = do
 ------------------------------------------------------------------------
 
 mkRemote :: (Decode b, Encode a) => Text -> Word64 -> Text -> a -> Remote b
-mkRemote protocol ver method arg = invoke (RemoteCall protocol ver method (toBytes arg) fromBytes)
+mkRemote protocol ver method arg =
+    invoke (RemoteCall protocol ver method (delimitedBytes arg) fromDelimtedBytes)
 
 hdfs :: (Decode b, Encode a) => Text -> a -> Remote b
 hdfs = mkRemote "org.apache.hadoop.hdfs.protocol.ClientProtocol" 1
@@ -171,11 +176,32 @@ rename src dst overwrite = ignore <$> hdfs "rename2" Rename2Request
 
 ------------------------------------------------------------------------
 
+-- TODO remove hack when we have our own monad
+clientId :: ByteString
+clientId = unsafePerformIO $ L.toStrict . UUID.toByteString <$> liftIO randomIO
+{-# NOINLINE clientId #-}
+
 login :: User -> Remote ()
-login user = sourcePut (putContext context)
+login user = sourcePut $ do
+    putByteString "hrpc"
+    putWord8 9 -- version
+    putWord8 0 -- rpc service class (0 = default/protobuf, 1 = built-in, 2 = writable, 3 = protobuf)
+    putWord8 0 -- auth protocol (0 = none, -33/0xDF = sasl)
+    putMessage $ delimitedBytesL header
+              <> delimitedBytesL context
   where
+    -- call-id must be -3 for the first request (the one with the
+    -- IpcConnectionContext) after that set it to 0 and increment.
+    header = RpcRequestHeader
+        { reqKind       = putField (Just ProtocolBuffer)
+        , reqOp         = putField (Just FinalPacket)
+        , reqCallId     = putField (-3)
+        , reqClientId   = putField clientId
+        , reqRetryCount = putField (Just (-1))
+        }
+
     context = IpcConnectionContext
-        { ctxProtocol = putField (Just "hadoop-hs")
+        { ctxProtocol = putField (Just "org.apache.hadoop.hdfs.protocol.ClientProtocol")
         , ctxUserInfo = putField (Just UserInformation
             { effectiveUser = putField (Just user)
             , realUser      = mempty
@@ -185,27 +211,38 @@ login user = sourcePut (putContext context)
 ------------------------------------------------------------------------
 
 invoke :: RemoteCall a -> Remote a
-invoke rpc = do
-    sourcePut (putRequest header request)
-    response <- sinkGet decodeLengthPrefixedMessage
-    case get rspStatus response of
-      Success -> sinkGet (rpcDecode rpc <$> getResponse) >>= throwLeft
-      _       -> sinkGet getError >>= liftIO . throwIO
+invoke RemoteCall{..} = do
+    sourcePut $ putMessage $ delimitedBytesL rpcRequestHeader
+                          <> delimitedBytesL requestHeader
+                          <> L.fromStrict rpcBytes
+    x <- sinkGet $ do
+      size <- fromIntegral <$> getWord32be
+      isolate size $ do
+        rsp <- decodeLengthPrefixedMessage
+        case get rspStatus rsp of
+          Success -> rpcDecode <$> getRemaining
+          _       -> return (Left (rspError rsp))
+
+    throwLeft x
   where
     throwLeft (Left err) = liftIO (throwIO err)
     throwLeft (Right x)  = return x
 
-    header = RpcRequestHeader
+    rspError rsp = RemoteError (fromMaybe "unknown error" $ get rspExceptionClassName rsp)
+                               (fromMaybe "unknown error" $ get rspErrorMsg rsp)
+
+    rpcRequestHeader = RpcRequestHeader
         { reqKind       = putField (Just ProtocolBuffer)
         , reqOp         = putField (Just FinalPacket)
-        , reqCallId     = putField 1
+        , reqCallId     = putField 0
+        , reqClientId   = putField clientId
+        , reqRetryCount = putField (Just (-1))
         }
 
-    request = RpcRequest
-        { reqMethodName      = putField (rpcMethodName rpc)
-        , reqBytes           = putField (Just (rpcBytes rpc))
-        , reqProtocolName    = putField (rpcProtocolName rpc)
-        , reqProtocolVersion = putField (rpcProtocolVersion rpc)
+    requestHeader = RequestHeader
+        { reqMethodName      = putField rpcMethodName
+        , reqProtocolName    = putField rpcProtocolName
+        , reqProtocolVersion = putField rpcProtocolVersion
         }
 
 ------------------------------------------------------------------------
@@ -213,45 +250,27 @@ invoke rpc = do
 -- hadoop-2.1.0-beta is on version 9
 -- see https://issues.apache.org/jira/browse/HADOOP-8990 for differences
 
-putContext :: IpcConnectionContext -> Put
-putContext ctx = do
-    putByteString "hrpc"
-    putWord8 7  -- version
-    putWord8 80 -- auth method (80 = simple, 81 = kerberos/gssapi, 82 = token/digest-md5)
-    putWord8 0  -- ipc serialization type (0 = protobuf)
-    putBlob (toBytes ctx)
+putMessage :: L.ByteString -> Put
+putMessage body = do
+    putWord32be (fromIntegral (L.length body))
+    putLazyByteString body
 
-putRequest :: RpcRequestHeader -> RpcRequest -> Put
-putRequest hdr req = putBlob (toLPBytes hdr <> toLPBytes req)
-
-putBlob :: ByteString -> Put
-putBlob bs = do
-    putWord32be (fromIntegral (B.length bs))
-    putByteString bs
-
-getResponse :: Get ByteString
-getResponse = do
-    n <- fromIntegral <$> getWord32be
+getRemaining :: Get ByteString
+getRemaining = do
+    n <- remaining
     getByteString n
 
-getError :: Get RemoteError
-getError = RemoteError <$> getText <*> getText
-  where
-    getText = do
-        n <- fromIntegral <$> getWord32be
-        T.decodeUtf8 <$> getByteString n
+delimitedBytes :: Encode a => a -> ByteString
+delimitedBytes = runPut . encodeLengthPrefixedMessage
 
-toBytes :: Encode a => a -> ByteString
-toBytes = runPut . encodeMessage
+delimitedBytesL :: Encode a => a -> L.ByteString
+delimitedBytesL = L.fromStrict . delimitedBytes
 
-toLPBytes :: Encode a => a -> ByteString
-toLPBytes = runPut . encodeLengthPrefixedMessage
-
-fromBytes :: Decode a => ByteString -> Either RemoteError a
-fromBytes bs = case runGetState decodeMessage bs 0 of
-    Left err      -> Left (RemoteError "fromBytes" (T.pack err))
+fromDelimtedBytes :: Decode a => ByteString -> Either RemoteError a
+fromDelimtedBytes bs = case runGetState decodeLengthPrefixedMessage bs 0 of
+    Left err      -> Left (RemoteError "fromDelimtedBytes" (T.pack err))
     Right (x, "") -> Right x
-    Right (_, _)  -> Left (RemoteError "fromBytes" "decoded response but did not consume enough bytes")
+    Right (_, _)  -> Left (RemoteError "fromDelimtedBytes" "decoded response but did not consume enough bytes")
 
 get :: HasField a => (t -> a) -> t -> FieldType a
 get f x = getField (f x)
