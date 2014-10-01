@@ -1,15 +1,16 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 
-module Hadoop.Protobuf.Security where
+module Data.Hadoop.Protobuf.Security where
 
 import Data.ByteString (ByteString)
 import Data.ProtocolBuffers
 import Data.ProtocolBuffers.Orphans ()
 import Data.Text (Text)
-import Data.Int (Int32, Int64)
-import Data.Word (Word32, Word64)
+import Data.Word (Word64)
 import GHC.Generics (Generic)
+
+------------------------------------------------------------------------
 
 -- | Security token identifier
 data Token = Token
@@ -63,4 +64,3 @@ data CancelDelegationTokenResponse = CancelDelegationTokenResponse
 
 instance Encode CancelDelegationTokenResponse
 instance Decode CancelDelegationTokenResponse
-

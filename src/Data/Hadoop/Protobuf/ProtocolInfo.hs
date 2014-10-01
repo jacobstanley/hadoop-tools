@@ -1,12 +1,11 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 
-module Hadoop.Protobuf.ProtocolInfo where
-
-import Data.Word (Word32, Word64)
+module Data.Hadoop.Protobuf.ProtocolInfo where
 
 import Data.ProtocolBuffers
 import Data.Text (Text)
+import Data.Word (Word32, Word64)
 import GHC.Generics (Generic)
 
 ------------------------------------------------------------------------

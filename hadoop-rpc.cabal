@@ -1,8 +1,8 @@
-name:          hadoop-tools
-version:       0.2
-synopsis:      Fast command line tools for working with Hadoop.
-description:   Fast command line tools for working with Hadoop.
-homepage:      http://github.com/jystic/hadoop-tools
+name:          hadoop-rpc
+version:       0.1
+synopsis:      Use the Hadoop RPC interface from Haskell.
+description:   Use the Hadoop RPC interface from Haskell.
+homepage:      http://github.com/jystic/hadoop-rpc
 license:       Apache-2.0
 license-file:  LICENSE
 author:        Jacob Stanley, Conrad Parker
@@ -11,17 +11,25 @@ category:      Data
 build-type:    Simple
 cabal-version: >= 1.10
 
-executable hh
+library
+  hs-source-dirs: src
   default-language: Haskell2010
 
-  main-is: Main.hs
-  hs-source-dirs: src
-
-  other-modules:
-    Paths_hadoop_tools
+  exposed-modules:
+    Data.Hadoop.Protobuf.ClientNameNode
+    Data.Hadoop.Protobuf.DataTransfer
+    Data.Hadoop.Protobuf.Hdfs
+    Data.Hadoop.Protobuf.Headers
+    Data.Hadoop.Protobuf.ProtocolInfo
+    Data.Hadoop.Protobuf.Security
+    Data.Hadoop.Types
+    Network.Hadoop.Hdfs
+    Network.Hadoop.Rpc
+    Network.Hadoop.Stream
 
   build-depends:
       base                 >= 4.7 && < 5
+    , attoparsec           >= 0.12.1.2
     , boxes                >= 0.1
     , bytestring           >= 0.10
     , cereal               >= 0.4
@@ -34,7 +42,6 @@ executable hh
     , network              >= 2.5
     , network-simple       >= 0.4
     , old-locale           >= 1.0
-    , optparse-applicative >= 0.10
     , protobuf             >= 0.2.0.4
     , socks                >= 0.5
     , split                >= 0.2

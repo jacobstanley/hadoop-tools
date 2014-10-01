@@ -1,7 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 
-module Hadoop.Protobuf.Hdfs where
+module Data.Hadoop.Protobuf.Hdfs where
 
 import Data.ByteString (ByteString)
 import Data.ProtocolBuffers

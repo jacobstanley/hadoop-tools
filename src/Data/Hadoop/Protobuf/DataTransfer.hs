@@ -2,23 +2,22 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# OPTIONS_GHC -fcontext-stack=37 #-}
 
-module Hadoop.Protobuf.DataTransfer where
+-- | This module contains protocol buffers that are used to transfer data
+-- to and from the datanode, as well as between datanodes.
+module Data.Hadoop.Protobuf.DataTransfer where
 
 import Data.ByteString (ByteString)
+import Data.Int (Int32, Int64)
 import Data.ProtocolBuffers
 import Data.ProtocolBuffers.Orphans ()
 import Data.Text (Text)
-import Data.Int (Int32, Int64)
 import Data.Word (Word32, Word64)
 import GHC.Generics (Generic)
 
+import Data.Hadoop.Protobuf.Hdfs
+import Data.Hadoop.Protobuf.Security
 
--- This file contains protocol buffers that are used to transfer data
--- to and from the datanode, as well as between datanodes.
-
--- import "Security.proto";
-import Hadoop.Protobuf.Hdfs
-import Hadoop.Protobuf.Security
+------------------------------------------------------------------------
 
 data DataTransferEncryptorStatus =
     DTES_SUCCESS | DTES_ERROR_UNKNOWN_KEY | DTES_ERROR
@@ -138,7 +137,7 @@ instance Enum BlockConstructionStage where
 
 instance Encode BlockConstructionStage
 instance Decode BlockConstructionStage
-  
+
 data OpWriteBlock = OpWriteBlock
     { owbHeader    :: Required 1 (Message ClientOperationHeader)
     , owbTargets   :: Repeated 2 (Message DataNodeInfo)
@@ -156,7 +155,7 @@ data OpWriteBlock = OpWriteBlock
 
 instance Encode OpWriteBlock
 instance Decode OpWriteBlock
-  
+
 data OpTransferBlock = OpTransferBlock
     { otbHeader  :: Required 1 (Message ClientOperationHeader)
     , otbTargets :: Repeated 2 (Message DataNodeInfo)
@@ -234,20 +233,23 @@ instance Enum DataTransferStatus where
       5 -> DT_ERROR_ACCESS_TOKEN
       6 -> DT_CHECKSUM_OK
       7 -> DT_ERROR_UNSUPPORTED
+      _ -> error $ "DataTransferStatus.toEnum: invalid enum value <" ++ show n ++ ">"
 
     fromEnum e = case e of
-      DT_SUCCESS -> 0
-      DT_ERROR -> 1
-      DT_ERROR_CHECKSUM -> 2
-      DT_ERROR_INVALID -> 3
-      DT_ERROR_EXISTS -> 4
+      DT_SUCCESS            -> 0
+      DT_ERROR              -> 1
+      DT_ERROR_CHECKSUM     -> 2
+      DT_ERROR_INVALID      -> 3
+      DT_ERROR_EXISTS       -> 4
       DT_ERROR_ACCESS_TOKEN -> 5
-      DT_CHECKSUM_OK -> 6
-      DT_ERROR_UNSUPPORTED -> 7
+      DT_CHECKSUM_OK        -> 6
+      DT_ERROR_UNSUPPORTED  -> 7
 
 data PipelineAck = PipelineAck
     { psSeqno  :: Required 1 (Value (Signed Int64))
-    , paStatus :: Repeated 2 (Enumeration DataTransferStatus)
+    -- TODO paStatus should be a repeated field but there is a bug in protobuf
+    -- TODO with repeated enumeration's
+    , paStatus :: Optional 2 (Enumeration DataTransferStatus)
     , paDownstreamAckTimeNanos :: Optional 3 (Value Word64) -- ^ default = 0
     } deriving (Generic, Show)
 

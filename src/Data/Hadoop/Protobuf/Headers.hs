@@ -1,14 +1,13 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 
-module Hadoop.Protobuf.Headers where
-
-import Data.Word (Word32, Word64)
+module Data.Hadoop.Protobuf.Headers where
 
 import Data.ByteString (ByteString)
 import Data.ProtocolBuffers
 import Data.ProtocolBuffers.Orphans ()
 import Data.Text (Text)
+import Data.Word (Word32, Word64)
 import GHC.Generics (Generic)
 
 ------------------------------------------------------------------------

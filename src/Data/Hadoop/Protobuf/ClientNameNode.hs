@@ -2,7 +2,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# OPTIONS_GHC -fcontext-stack=37 #-}
 
-module Hadoop.Protobuf.ClientNameNode where
+module Data.Hadoop.Protobuf.ClientNameNode where
 
 import Data.ByteString (ByteString)
 import Data.ProtocolBuffers
@@ -10,7 +10,7 @@ import Data.Text (Text)
 import Data.Word (Word64)
 import GHC.Generics (Generic)
 
-import Hadoop.Protobuf.Hdfs
+import Data.Hadoop.Protobuf.Hdfs
 
 ------------------------------------------------------------------------
 
