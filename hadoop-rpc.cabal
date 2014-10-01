@@ -30,7 +30,7 @@ library
 
   build-depends:
       base                 >= 4.7 && < 5
-    , attoparsec           >= 0.12.1.2
+    , attoparsec           >= 0.12
     , bytestring           >= 0.10
     , cereal               >= 0.4
     , network              >= 2.5
@@ -39,7 +39,8 @@ library
     , transformers         >= 0.4
     , unix                 >= 2.7
     , unordered-containers >= 0.2
-    , xmlhtml              >= 0.2.3.2
+    , vector               >= 0.10
+    , xmlhtml              >= 0.2
 
 executable test-hadoop-rpc
   main-is: Main.hs
@@ -48,7 +49,7 @@ executable test-hadoop-rpc
 
   build-depends:
       base                 >= 4.7 && < 5
-    , attoparsec           >= 0.12.1.2
+    , attoparsec           >= 0.12
     , bytestring           >= 0.10
     , cereal               >= 0.4
     , network              >= 2.5
@@ -57,4 +58,5 @@ executable test-hadoop-rpc
     , transformers         >= 0.4
     , unix                 >= 2.7
     , unordered-containers >= 0.2
-    , xmlhtml              >= 0.2.3.2
+    , vector               >= 0.10
+    , xmlhtml              >= 0.2

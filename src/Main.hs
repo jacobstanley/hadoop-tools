@@ -2,15 +2,21 @@
 
 module Main (main) where
 
-import Data.Hadoop.Protobuf.Hdfs
-import Data.Hadoop.Types
-import Data.ProtocolBuffers (getField)
-import Network.Hadoop.Hdfs
+import           Control.Applicative ((<$>))
+import           Data.Maybe (fromMaybe)
+import           Data.ProtocolBuffers (getField)
+import qualified Data.Vector as V
+
+import           Data.Hadoop.Protobuf.Hdfs
+import           Data.Hadoop.Types
+import           Network.Hadoop.Hdfs
 
 ------------------------------------------------------------------------
 
 main :: IO ()
 main = do
-    (Just ls) <- runHdfs' (Endpoint "192.168.56.10" 8020) (getListing "/")
-    let files = map (getField . fsPath) (getField $ dlPartialListing ls)
-    print files
+    files <- runHdfs' (Endpoint "192.168.56.10" 8020) $ do
+        foo <- fromMaybe V.empty <$> getListing "/"
+        return foo
+
+    print $ V.map (getField . fsPath) files
