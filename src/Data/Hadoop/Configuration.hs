@@ -35,11 +35,12 @@ getUser = maybe fromUnix return =<< fromEnv
 
 type HadoopConfig = H.HashMap Text Text
 
-getNameNodes :: IO (Maybe [NameNode])
+getNameNodes :: IO [NameNode]
 getNameNodes = do
     cfg <- H.union <$> readHadoopConfig "/etc/hadoop/conf/core-site.xml"
                    <*> readHadoopConfig "/etc/hadoop/conf/hdfs-site.xml"
-    return $ resolveNameNode cfg <$> (stripProto =<< H.lookup fsDefaultNameKey cfg)
+    return $ fromMaybe []
+           $ resolveNameNode cfg <$> (stripProto =<< H.lookup fsDefaultNameKey cfg)
   where
     proto            = "hdfs://"
     fsDefaultNameKey = "fs.defaultFS"

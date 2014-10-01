@@ -3,13 +3,14 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Network.Hadoop.Rpc
-    ( Connection(..)
+    ( RemoteError(..)
+
+    , Connection(..)
     , Protocol(..)
     , User
     , Method
     , RawRequest
     , RawResponse
-    , RemoteError(..)
 
     , initConnectionV7
     , invoke
@@ -33,11 +34,18 @@ import           Data.ProtocolBuffers
 import           Data.ProtocolBuffers.Orphans ()
 import           Data.Serialize.Get
 import           Data.Serialize.Put
-import           Network.Socket
 
 import           Data.Hadoop.Protobuf.Headers
 import           Data.Hadoop.Types
 import qualified Network.Hadoop.Stream as S
+import           Network.Socket (Socket)
+
+------------------------------------------------------------------------
+
+data RemoteError = RemoteError !Text !Text
+    deriving (Show, Eq, Data, Typeable)
+
+instance Exception RemoteError
 
 ------------------------------------------------------------------------
 
@@ -56,11 +64,6 @@ data Protocol = Protocol
 type Method      = Text
 type RawRequest  = ByteString
 type RawResponse = ByteString
-
-data RemoteError = RemoteError !Text !Text
-    deriving (Show, Eq, Data, Typeable)
-
-instance Exception RemoteError
 
 ------------------------------------------------------------------------
 
