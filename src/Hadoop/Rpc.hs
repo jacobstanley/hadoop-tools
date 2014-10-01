@@ -15,6 +15,7 @@ module Hadoop.Rpc
     , runTcp
     , runSocks
     , runSocket
+    , login
 
     , CreateParent
     , Recursive
@@ -97,15 +98,15 @@ data Endpoint = Endpoint
 
 ------------------------------------------------------------------------
 
-runTcp :: NameNode -> User -> Remote a -> IO a
-runTcp nameNode user remote = connect host port (\(s,_) -> runSocket s user remote)
+runTcp :: NameNode -> Remote a -> IO a
+runTcp nameNode remote = connect host port (\(s,_) -> runSocket s remote)
   where
     host = T.unpack (epHost nameNode)
     port = show (epPort nameNode)
 
-runSocks :: SocksProxy -> NameNode -> User -> Remote a -> IO a
-runSocks proxy nameNode user remote =
-    bracket (socksConnectWith proxyConf host port) closeSock (\s -> runSocket s user remote)
+runSocks :: SocksProxy -> NameNode -> Remote a -> IO a
+runSocks proxy nameNode remote =
+    bracket (socksConnectWith proxyConf host port) closeSock (\s -> runSocket s remote)
   where
     proxyConf = defaultSocksConf (T.unpack $ epHost proxy)
                                  (fromIntegral $ epPort proxy)
@@ -113,11 +114,11 @@ runSocks proxy nameNode user remote =
     host = T.unpack (epHost nameNode)
     port = PortNumber (fromIntegral $ epPort nameNode)
 
-runSocket :: Socket -> User -> Remote a -> IO a
-runSocket sock user remote = do
+runSocket :: Socket -> Remote a -> IO a
+runSocket sock remote = do
     -- TODO Must be a better way to do this
     ref <- newIORef (error "_|_")
-    let runWrite = login user >> remote >>= liftIO . atomicWriteIORef ref
+    let runWrite = remote >>= liftIO . atomicWriteIORef ref
     sourceSocket sock =$= runWrite $$ sinkSocket sock
     readIORef ref
 

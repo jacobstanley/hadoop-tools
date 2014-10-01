@@ -63,7 +63,7 @@ runRemote remote = do
     socksProxy <- getSocksProxy
 
     let run = maybe runTcp runSocks socksProxy
-    run nameNode hdfsUser remote
+    run nameNode (login hdfsUser >> remote)
 
 ------------------------------------------------------------------------
 
