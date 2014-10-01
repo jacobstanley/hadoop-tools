@@ -7,6 +7,7 @@ module Hadoop.Protobuf.ClientNameNode where
 import Data.ByteString (ByteString)
 import Data.ProtocolBuffers
 import Data.Text (Text)
+import Data.Word (Word64)
 import GHC.Generics (Generic)
 
 import Hadoop.Protobuf.Hdfs
@@ -113,3 +114,21 @@ data Rename2Response = Rename2Response
 
 instance Encode Rename2Response
 instance Decode Rename2Response
+
+------------------------------------------------------------------------
+
+data GetBlockLocationsRequest = GetBlockLocationsRequest
+    { catSrc    :: Required 1 (Value Text)
+    , catOffset :: Required 2 (Value Word64)
+    , catLength :: Required 3 (Value Word64)
+    } deriving (Generic, Show)
+
+instance Encode GetBlockLocationsRequest
+instance Decode GetBlockLocationsRequest
+
+data GetBlockLocationsResponse = GetBlockLocationsResponse
+    { locsLocations :: Optional 1 (Message LocatedBlocks)
+    } deriving (Generic, Show)
+
+instance Encode GetBlockLocationsResponse
+instance Decode GetBlockLocationsResponse
