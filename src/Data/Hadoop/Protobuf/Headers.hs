@@ -54,7 +54,7 @@ data RpcRequestHeader = RpcRequestHeader
     , reqOp         :: Optional 2 (Enumeration RpcOperation)
     , reqCallId     :: Required 3 (Value Word32)     -- ^ A sequence number that is sent back in the response
 
-    -- | Fields below don't apply until v9
+    -- Fields below don't apply until v9
     --, reqClientId   :: Required 4 (Value ByteString) -- ^ Globally unique client ID
     --, reqRetryCount :: Optional 5 (Value Int32)      -- ^ Retry count, 1 means this is the first retry
     } deriving (Generic, Show)
@@ -103,7 +103,7 @@ data RpcResponseHeader = RpcResponseHeader
     , rspStatus             :: Required 2 (Enumeration RpcStatus)
     , rspServerIpcVersion   :: Optional 3 (Value Word32)          -- ^ v7: Sent if fatal v9: Sent if success or fail
 
-    -- | Fields below don't apply until v9
+    -- Fields below don't apply until v9
     --, rspExceptionClassName :: Optional 4 (Value Text)            -- ^ If the request fails
     --, rspErrorMsg           :: Optional 5 (Value Text)            -- ^ If the request fails, often contains stack trace
     --, rspErrorDetail        :: Optional 6 (Enumeration Error)  -- ^ In case of error
