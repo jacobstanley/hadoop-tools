@@ -17,17 +17,23 @@ executable hh
   main-is: Main.hs
   hs-source-dirs: src
 
+  ghc-options: -funbox-strict-fields -threaded
+  ghc-prof-options: -auto-all -caf-all
+
   other-modules:
     Paths_hadoop_tools
 
   build-depends:
       base                 >= 4.7 && < 5
+    , async                >= 2.0
     , boxes                >= 0.1
     , bytestring           >= 0.10
     , configurator         >= 0.3
     , exceptions           >= 0.6
     , filepath             >= 1.3
     , hadoop-rpc           >= 0.1
+    , hashable             >= 1.2.1
+    , haxl                 >= 0.1
     , old-locale           >= 1.0
     , optparse-applicative >= 0.10
     , protobuf             >= 0.2.0.4
