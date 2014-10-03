@@ -36,3 +36,10 @@ data ConfigError = ConfigError !Text
     deriving (Show, Eq, Data, Typeable)
 
 instance Exception ConfigError
+
+------------------------------------------------------------------------
+
+data RemoteError = RemoteError !Text !Text
+    deriving (Show, Eq, Data, Typeable)
+
+instance Exception RemoteError

@@ -3,9 +3,7 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Network.Hadoop.Rpc
-    ( RemoteError(..)
-
-    , Connection(..)
+    ( Connection(..)
     , Protocol(..)
     , User
     , Method
@@ -17,18 +15,16 @@ module Network.Hadoop.Rpc
     ) where
 
 import           Control.Applicative ((<$>), (<*>))
-import           Control.Exception (Exception, throwIO)
+import           Control.Exception (throwIO)
 import           Control.Monad.IO.Class (liftIO)
 
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as B
-import           Data.Data (Data)
 import           Data.IORef
 import           Data.Monoid (mempty)
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import           Data.Typeable (Typeable)
 
 import           Data.ProtocolBuffers
 import           Data.ProtocolBuffers.Orphans ()
@@ -39,13 +35,6 @@ import           Data.Hadoop.Protobuf.Headers
 import           Data.Hadoop.Types
 import qualified Network.Hadoop.Stream as S
 import           Network.Socket (Socket)
-
-------------------------------------------------------------------------
-
-data RemoteError = RemoteError !Text !Text
-    deriving (Show, Eq, Data, Typeable)
-
-instance Exception RemoteError
 
 ------------------------------------------------------------------------
 
