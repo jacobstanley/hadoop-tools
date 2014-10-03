@@ -86,12 +86,10 @@ initConnectionV7 user protocol sock = do
             putWord32be (fromIntegral (B.length bs))
             putByteString bs
 
-        let streamGet g = maybe throwClosed return =<< S.maybeGet stream g
-
         responseHdr <- S.maybeGet stream decodeLengthPrefixedMessage
         case getField . rspStatus <$> responseHdr of
-            Just Success -> streamGet getResponse
-            Just _       -> streamGet getError >>= liftIO . throwIO
+            Just Success -> S.runGet stream getResponse
+            Just _       -> S.runGet stream getError >>= liftIO . throwIO
             Nothing      -> throwClosed
 
     context = IpcConnectionContext
