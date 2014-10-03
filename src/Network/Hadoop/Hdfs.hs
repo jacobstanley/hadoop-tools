@@ -8,6 +8,7 @@ module Network.Hadoop.Hdfs
     , getConnection
     , runHdfs
     , runHdfs'
+    , hdfsInvoke
 
     , CreateParent
     , Recursive

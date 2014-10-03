@@ -27,6 +27,7 @@ library
     Data.Hadoop.Protobuf.Security
     Data.Hadoop.Types
     Network.Hadoop.Hdfs
+    Network.Hadoop.Read
     Network.Hadoop.Rpc
     Network.Hadoop.Socket
     Network.Hadoop.Stream
