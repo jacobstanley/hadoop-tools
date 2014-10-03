@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 --------------------------------------------------------------------------------
 -- | Lightweight abstraction over an input/output stream.
 -- (stolen from 'websockets' package)
@@ -9,6 +11,7 @@ module Network.Hadoop.Stream
     , mkEchoStream
     , parse
     , maybeGet
+    , runGet
     , runPut
     , write
     , close
@@ -16,6 +19,7 @@ module Network.Hadoop.Stream
 
 import           Control.Applicative ((<$>))
 import qualified Control.Concurrent.Chan as Chan
+import           Control.Exception (throwIO)
 import           Control.Monad (forM_)
 import qualified Data.Attoparsec.ByteString as Atto
 import qualified Data.ByteString as B
@@ -26,6 +30,8 @@ import qualified Data.Serialize.Put as Put
 import qualified Network.Socket as S
 import qualified Network.Socket.ByteString as B (recv)
 import qualified Network.Socket.ByteString.Lazy as L (sendAll)
+
+import           Data.Hadoop.Types
 
 --------------------------------------------------------------------------------
 
@@ -135,6 +141,11 @@ maybeGet stream getter = do
                 Nothing -> go (f B.empty) True
                 Just bs -> go (f bs) False
     go (Get.Fail err _) _ = error ("runGetStream: " ++ err)
+
+runGet :: Stream -> Get.Get a -> IO a
+runGet stream getter = maybe throwClosed return =<< maybeGet stream getter
+  where
+    throwClosed = throwIO (RemoteError "ConnectionClosed" "The socket connection was closed")
 
 --------------------------------------------------------------------------------
 
