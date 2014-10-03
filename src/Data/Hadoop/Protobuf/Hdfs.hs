@@ -10,6 +10,8 @@ import Data.Text (Text)
 import Data.Word (Word32, Word64)
 import GHC.Generics (Generic)
 
+import Data.Hadoop.Protobuf.Security
+
 ------------------------------------------------------------------------
 
 -- | Summary of a file or directory
@@ -136,7 +138,7 @@ data LocatedBlock = LocatedBlock
     -- | `True` if all replicas of a block are corrupt. If the block has a few corrupt replicas,
     -- they are filtered and their locations are not part of this object.
     , lbCorrupt   :: Required 4 (Value Bool)
-    , lbToken     :: Required 5 (Message BlockTokenId)
+    , lbToken     :: Required 5 (Message Token)
     } deriving (Generic, Show)
 
 instance Encode LocatedBlock
@@ -195,12 +197,4 @@ instance Decode DataNodeId
 
 ------------------------------------------------------------------------
 
-data BlockTokenId = BlockTokenId
-    { btId       :: Required 1 (Value ByteString)
-    , btPassword :: Required 2 (Value ByteString)
-    , btKind     :: Required 3 (Value Text)
-    , btService  :: Required 4 (Value Text)
-    } deriving (Generic, Show)
-
-instance Encode BlockTokenId
-instance Decode BlockTokenId
+-- BlockTokenId was moved to Security.Token in protocol version 9
