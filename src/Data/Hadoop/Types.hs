@@ -3,6 +3,7 @@
 module Data.Hadoop.Types where
 
 import Control.Exception (Exception)
+import Data.ByteString (ByteString)
 import Data.Data (Data)
 import Data.Text (Text)
 import Data.Typeable (Typeable)
@@ -21,6 +22,8 @@ data Endpoint = Endpoint
 
 type HostName = Text
 type Port     = Int
+
+type HdfsPath = ByteString
 
 ------------------------------------------------------------------------
 

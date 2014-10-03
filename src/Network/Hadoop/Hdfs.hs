@@ -11,6 +11,8 @@ module Network.Hadoop.Hdfs
 
     , CreateParent
     , Recursive
+    , Overwrite
+    , NeedLocation
 
     , getListing
     , getListing'
@@ -32,7 +34,7 @@ import           Data.Maybe (fromMaybe)
 import           Data.ProtocolBuffers
 import           Data.ProtocolBuffers.Orphans ()
 import           Data.Text (Text)
-import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 import qualified Data.Vector as V
 
 import           Data.Hadoop.Configuration
@@ -71,6 +73,7 @@ instance MonadCatch Hdfs where
 type CreateParent = Bool
 type Recursive    = Bool
 type Overwrite    = Bool
+type NeedLocation = Bool
 
 ------------------------------------------------------------------------
 
@@ -102,9 +105,9 @@ hdfsInvoke method arg = Hdfs $ \c -> invoke c method arg
 
 ------------------------------------------------------------------------
 
-getListing :: FilePath -> Hdfs (Maybe (V.Vector FileStatus))
-getListing path = do
-    mDirList <- getPartialListing path ""
+getListing :: NeedLocation -> HdfsPath -> Hdfs (Maybe (V.Vector FileStatus))
+getListing needLocation path = do
+    mDirList <- getPartialListing needLocation path ""
     case mDirList of
       Nothing -> return Nothing
       Just dirList -> do
@@ -125,7 +128,7 @@ getListing path = do
 
     loop :: [V.Vector FileStatus] -> ByteString -> Hdfs (V.Vector FileStatus)
     loop ps startAfter = do
-        dirList <- fromMaybe emptyListing <$> getPartialListing path startAfter
+        dirList <- fromMaybe emptyListing <$> getPartialListing needLocation path startAfter
 
         let p   = V.fromList . getField . dlPartialListing $ dirList
             ps' = ps ++ [p]
@@ -137,45 +140,45 @@ getListing path = do
 
     emptyListing = DirectoryListing (putField []) (putField 0)
 
-getListing' :: FilePath -> Hdfs (V.Vector FileStatus)
-getListing' path = fromMaybe V.empty <$> getListing path
+getListing' :: HdfsPath -> Hdfs (V.Vector FileStatus)
+getListing' path = fromMaybe V.empty <$> getListing False path
 
 ------------------------------------------------------------------------
 
-getPartialListing :: FilePath -> ByteString -> Hdfs (Maybe DirectoryListing)
-getPartialListing path startAfter = get lsDirList <$> hdfsInvoke "getListing" GetListingRequest
-    { lsSrc          = putField (T.pack path)
+getPartialListing :: NeedLocation -> HdfsPath -> ByteString -> Hdfs (Maybe DirectoryListing)
+getPartialListing needLocation path startAfter = get lsDirList <$> hdfsInvoke "getListing" GetListingRequest
+    { lsSrc          = putField (T.decodeUtf8 path)
     , lsStartAfter   = putField startAfter
-    , lsNeedLocation = putField True
+    , lsNeedLocation = putField needLocation
     }
 
-getFileInfo :: FilePath -> Hdfs (Maybe FileStatus)
+getFileInfo :: HdfsPath -> Hdfs (Maybe FileStatus)
 getFileInfo path = get fiFileStatus <$> hdfsInvoke "getFileInfo" GetFileInfoRequest
-    { fiSrc = putField (T.pack path)
+    { fiSrc = putField (T.decodeUtf8 path)
     }
 
-getContentSummary :: FilePath -> Hdfs ContentSummary
+getContentSummary :: HdfsPath -> Hdfs ContentSummary
 getContentSummary path = get csSummary <$> hdfsInvoke "getContentSummary" GetContentSummaryRequest
-    { csPath = putField (T.pack path)
+    { csPath = putField (T.decodeUtf8 path)
     }
 
-mkdirs :: FilePath -> CreateParent -> Hdfs Bool
-mkdirs path createParent = get mdResult <$> hdfsInvoke "mkdirs" MkdirsRequest
-    { mdSrc          = putField (T.pack path)
+mkdirs :: CreateParent -> HdfsPath -> Hdfs Bool
+mkdirs createParent path = get mdResult <$> hdfsInvoke "mkdirs" MkdirsRequest
+    { mdSrc          = putField (T.decodeUtf8 path)
     , mdMasked       = putField (FilePermission (putField 0o755))
     , mdCreateParent = putField createParent
     }
 
-delete :: FilePath -> Recursive -> Hdfs Bool
-delete path recursive = get dlResult <$> hdfsInvoke "delete" DeleteRequest
-    { dlSrc       = putField (T.pack path)
+delete :: Recursive -> HdfsPath -> Hdfs Bool
+delete recursive path = get dlResult <$> hdfsInvoke "delete" DeleteRequest
+    { dlSrc       = putField (T.decodeUtf8 path)
     , dlRecursive = putField recursive
     }
 
-rename :: FilePath -> FilePath -> Overwrite -> Hdfs ()
-rename src dst overwrite = ignore <$> hdfsInvoke "rename2" Rename2Request
-    { mvSrc       = putField (T.pack src)
-    , mvDst       = putField (T.pack dst)
+rename :: Overwrite -> HdfsPath -> HdfsPath -> Hdfs ()
+rename overwrite src dst = ignore <$> hdfsInvoke "rename2" Rename2Request
+    { mvSrc       = putField (T.decodeUtf8 src)
+    , mvDst       = putField (T.decodeUtf8 dst)
     , mvOverwrite = putField overwrite
     }
   where
