@@ -25,6 +25,7 @@ module Network.Hadoop.Hdfs
 import           Control.Applicative (Applicative(..), (<$>))
 import           Control.Exception (throw)
 import           Control.Monad (ap)
+import           Control.Monad.Catch (MonadThrow(..), MonadCatch(..))
 import           Control.Monad.IO.Class (MonadIO(..))
 import           Data.ByteString (ByteString)
 import           Data.Maybe (fromMaybe)
@@ -58,6 +59,12 @@ instance Monad Hdfs where
 
 instance MonadIO Hdfs where
     liftIO io = Hdfs $ \_ -> io
+
+instance MonadThrow Hdfs where
+    throwM = liftIO . throwM
+
+instance MonadCatch Hdfs where
+    catch m k = Hdfs $ \c -> unHdfs m c `catch` \e -> unHdfs (k e) c
 
 ------------------------------------------------------------------------
 
