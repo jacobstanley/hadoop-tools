@@ -1,6 +1,6 @@
-{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Network.Hadoop.Hdfs
@@ -13,6 +13,8 @@ module Network.Hadoop.Hdfs
     , Recursive
 
     , getListing
+    , getListing'
+    , getPartialListing
     , getFileInfo
     , getContentSummary
     , mkdirs
@@ -21,7 +23,7 @@ module Network.Hadoop.Hdfs
     ) where
 
 import           Control.Applicative (Applicative(..), (<$>))
-import           Control.Exception (throwIO)
+import           Control.Exception (throw)
 import           Control.Monad (ap)
 import           Control.Monad.IO.Class (MonadIO(..))
 import           Data.ByteString (ByteString)
@@ -70,21 +72,23 @@ hdfsProtocol = Protocol "org.apache.hadoop.hdfs.protocol.ClientProtocol" 1
 
 runHdfs :: Hdfs a -> IO a
 runHdfs hdfs = do
-    -- TODO This throws if it can't find the config xml files, maybe this is good?
-    nns <- getNameNodes
-    case nns of
-        []     -> throwIO (RemoteError "ConfigError" "Could not find name node configuration")
-        (nn:_) -> runHdfs' nn hdfs
+    config <- getHadoopConfig
+    runHdfs' config hdfs
 
-runHdfs' :: Endpoint -> Hdfs a -> IO a
-runHdfs' nameNode hdfs = do
-    user <- getUser
+runHdfs' :: HadoopConfig -> Hdfs a -> IO a
+runHdfs' HadoopConfig{..} hdfs = runSession session
+  where
+    session socket = do
+        conn <- initConnectionV7 hcUser hdfsProtocol socket
+        (unHdfs hdfs) conn
 
-    let app (sock, _) = do
-          conn <- initConnectionV7 user hdfsProtocol sock
-          (unHdfs hdfs) conn
+    nameNode = case hcNameNodes of
+        []    -> throw (ConfigError "Could not find name nodes in Hadoop configuration")
+        (x:_) -> x
 
-    S.runTcp nameNode app
+    runSession = case hcProxy of
+        Nothing    -> S.runTcp nameNode
+        Just proxy -> S.runSocks proxy nameNode
 
 hdfsInvoke :: (Decode b, Encode a) => Text -> a -> Hdfs b
 hdfsInvoke method arg = Hdfs $ \c -> invoke c method arg
@@ -125,6 +129,9 @@ getListing path = do
            else loop ps' sa
 
     emptyListing = DirectoryListing (putField []) (putField 0)
+
+getListing' :: FilePath -> Hdfs (V.Vector FileStatus)
+getListing' path = fromMaybe V.empty <$> getListing path
 
 ------------------------------------------------------------------------
 

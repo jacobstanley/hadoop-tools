@@ -1,5 +1,5 @@
 name:          hadoop-rpc
-version:       0.1
+version:       0.1.0.0
 synopsis:      Use the Hadoop RPC interface from Haskell.
 description:   Use the Hadoop RPC interface from Haskell.
 homepage:      http://github.com/jystic/hadoop-rpc
@@ -16,6 +16,7 @@ library
   default-language: Haskell2010
 
   exposed-modules:
+    Data.Hadoop.Configuration
     Data.Hadoop.Protobuf.ClientNameNode
     Data.Hadoop.Protobuf.DataTransfer
     Data.Hadoop.Protobuf.Hdfs
@@ -35,6 +36,7 @@ library
     , cereal               >= 0.4
     , network              >= 2.5
     , protobuf             >= 0.2.0.4
+    , socks                >= 0.5
     , text                 >= 1.1
     , transformers         >= 0.4
     , unix                 >= 2.7
@@ -54,6 +56,7 @@ executable test-hadoop-rpc
     , cereal               >= 0.4
     , network              >= 2.5
     , protobuf             >= 0.2.0.4
+    , socks                >= 0.5
     , text                 >= 1.1
     , transformers         >= 0.4
     , unix                 >= 2.7

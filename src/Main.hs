@@ -2,8 +2,6 @@
 
 module Main (main) where
 
-import           Control.Applicative ((<$>))
-import           Data.Maybe (fromMaybe)
 import           Data.ProtocolBuffers (getField)
 import qualified Data.Vector as V
 
@@ -15,8 +13,12 @@ import           Network.Hadoop.Hdfs
 
 main :: IO ()
 main = do
-    files <- runHdfs' (Endpoint "192.168.56.10" 8020) $ do
-        foo <- fromMaybe V.empty <$> getListing "/"
-        return foo
-
+    files <- runHdfs' config (getListing' "/")
     print $ V.map (getField . fsPath) files
+
+config :: HadoopConfig
+config = HadoopConfig {
+      hcUser      = "hdfs"
+    , hcNameNodes = [(Endpoint "127.0.0.1" 8020)]
+    , hcProxy     = Just (Endpoint "127.0.0.1" 2080)
+    }

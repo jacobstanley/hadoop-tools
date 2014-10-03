@@ -1,11 +1,14 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Data.Hadoop.Configuration
-    ( getUser
+    ( getHadoopConfig
+    , getHadoopUser
     , getNameNodes
     ) where
 
 import           Control.Applicative ((<$>), (<*>))
+import           Control.Exception (IOException, handle)
 import qualified Data.ByteString.Char8 as B
 import qualified Data.HashMap.Lazy as H
 import           Data.Maybe (fromMaybe, mapMaybe)
@@ -22,8 +25,17 @@ import           Data.Hadoop.Types
 
 ------------------------------------------------------------------------
 
-getUser :: IO User
-getUser = maybe fromUnix return =<< fromEnv
+getHadoopConfig :: IO HadoopConfig
+getHadoopConfig = do
+    hcUser <- getHadoopUser
+    hcNameNodes <- getNameNodes
+    let hcProxy = Nothing
+    return HadoopConfig{..}
+
+------------------------------------------------------------------------
+
+getHadoopUser :: IO User
+getHadoopUser = maybe fromUnix return =<< fromEnv
   where
     fromEnv :: IO (Maybe User)
     fromEnv  = fmap T.pack <$> lookupEnv "HADOOP_USER_NAME"
@@ -33,7 +45,7 @@ getUser = maybe fromUnix return =<< fromEnv
 
 ------------------------------------------------------------------------
 
-type HadoopConfig = H.HashMap Text Text
+type HadoopXml = H.HashMap Text Text
 
 getNameNodes :: IO [NameNode]
 getNameNodes = do
@@ -51,17 +63,17 @@ getNameNodes = do
     stripProto uri | proto `T.isPrefixOf` uri = Just (T.drop (T.length proto) uri)
                    | otherwise                = Nothing
 
-    resolveNameNode :: HadoopConfig -> Text -> [NameNode]
+    resolveNameNode :: HadoopXml -> Text -> [NameNode]
     resolveNameNode cfg name = case parseEndpoint name of
         Just ep -> [ep] -- contains "host:port" directly
         Nothing -> mapMaybe (\nn -> lookupAddress cfg $ name <> "." <> nn)
                             (lookupNameNodes cfg name)
 
-    lookupNameNodes :: HadoopConfig -> Text -> [Text]
+    lookupNameNodes :: HadoopXml -> Text -> [Text]
     lookupNameNodes cfg name = fromMaybe []
                              $ T.splitOn "," <$> H.lookup (nameNodesPrefix <> name) cfg
 
-    lookupAddress :: HadoopConfig -> Text -> Maybe Endpoint
+    lookupAddress :: HadoopXml -> Text -> Maybe Endpoint
     lookupAddress cfg name = parseEndpoint =<< H.lookup (rpcAddressPrefix <> name) cfg
 
     parseEndpoint :: Text -> Maybe Endpoint
@@ -71,9 +83,9 @@ getNameNodes = do
         port = either (const Nothing) (Just . fst)
              $ T.decimal $ T.drop (T.length host + 1) ep
 
-readHadoopConfig :: FilePath -> IO HadoopConfig
+readHadoopConfig :: FilePath -> IO HadoopXml
 readHadoopConfig path = do
-    exml <- parseXML path <$> B.readFile path
+    exml <- readXML path
     case exml of
       Left  _   -> return H.empty
       Right xml -> return (toHashMap (docContent xml))
@@ -83,3 +95,9 @@ readHadoopConfig path = do
 
     fromNode n = (,) <$> (nodeText <$> childElementTag "name" n)
                      <*> (nodeText <$> childElementTag "value" n)
+
+readXML :: FilePath -> IO (Either String Document)
+readXML path = handle onError (parseXML path <$> B.readFile path)
+  where
+    onError :: IOException -> IO (Either String Document)
+    onError e = return $ Left $ show e
