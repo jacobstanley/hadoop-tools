@@ -3,43 +3,38 @@
 
 module Main (main) where
 
-import           Control.Exception (SomeException, handle, throwIO)
+import           Control.Exception (SomeException)
 import           Control.Monad
+import           Control.Monad.Catch (handle, throwM)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 
 import           Data.Bits ((.&.), shiftR)
 import qualified Data.ByteString.Char8 as B
 import           Data.Foldable (foldMap)
-import qualified Data.HashMap.Lazy as H
-import           Data.List (intercalate)
-import           Data.List (isPrefixOf)
+import           Data.List (intercalate, isPrefixOf)
 import           Data.List.Split (splitOn)
-import           Data.Maybe (fromMaybe, maybeToList, mapMaybe, listToMaybe)
-import           Data.Text (Text)
+import           Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
-import qualified Data.Text.Read as T
 import           Data.Time
 import           Data.Time.Clock.POSIX
 import           Data.Word (Word16, Word32, Word64)
+import qualified Data.Vector as V
 
 import qualified Data.Configurator as C
 import           Data.Configurator.Types (Worth(..))
-import           System.Environment (getEnv, lookupEnv)
+import           System.Environment (getEnv)
 import           System.FilePath.Posix
 import           System.IO.Unsafe (unsafePerformIO)
 import           System.Locale (defaultTimeLocale)
-import           System.Posix.User (getEffectiveUserName)
 import           Text.PrettyPrint.Boxes hiding ((<>))
-import           Text.XmlHtml
 
-import           Data.Conduit (handleC)
-import           Data.ProtocolBuffers
-import           Data.ProtocolBuffers.Orphans ()
-
-import           Hadoop.Protobuf.Hdfs
-import           Hadoop.Rpc
+import           Data.Hadoop.Configuration (getHadoopConfig)
+import           Data.Hadoop.Protobuf.Hdfs
+import           Data.Hadoop.Types
+import           Data.ProtocolBuffers (HasField(..), FieldType, getField)
+import           Network.Hadoop.Hdfs hiding (runHdfs)
 
 import           Options.Applicative hiding (Success)
 
@@ -51,19 +46,29 @@ import           Paths_hadoop_tools (version)
 main :: IO ()
 main = do
     cmd <- execParser optsParser
-    handle printError (runRemote cmd)
+    handle printError (runHdfs cmd)
   where
     optsParser = info (helper <*> options)
                       (fullDesc <> header "hh - Blazing fast interaction with HDFS")
 
-runRemote :: Remote a -> IO a
-runRemote remote = do
+runHdfs :: Hdfs a -> IO a
+runHdfs hdfs = do
+    config <- getConfig
+    runHdfs' config hdfs
+
+getConfig :: IO HadoopConfig
+getConfig = do
     hdfsUser   <- getHdfsUser
     nameNode   <- getNameNode
     socksProxy <- getSocksProxy
 
-    let run = maybe runTcp runSocks socksProxy
-    run nameNode (login hdfsUser >> remote)
+    liftM ( set hdfsUser   (\c x -> c { hcUser      = x })
+          . set nameNode   (\c x -> c { hcNameNodes = [x] })
+          . set socksProxy (\c x -> c { hcProxy     = Just x })
+          ) getHadoopConfig
+  where
+    set :: Maybe a -> (b -> a -> b) -> b -> b
+    set m f c = maybe c (f c) m
 
 ------------------------------------------------------------------------
 
@@ -73,33 +78,15 @@ configPath = unsafePerformIO $ do
     return (home </> ".hh")
 {-# NOINLINE configPath #-}
 
-getHdfsUser :: IO User
-getHdfsUser = attempt [fromEnv, fromCfg] fromUnix
-  where
-    fromEnv :: IO (Maybe User)
-    fromEnv  = fmap T.pack <$> lookupEnv "HADOOP_USER_NAME"
+getHdfsUser :: IO (Maybe User)
+getHdfsUser = C.load [Optional configPath] >>= flip C.lookup "hdfs.user"
 
-    fromCfg :: IO (Maybe User)
-    fromCfg  = C.load [Optional configPath] >>= flip C.lookup "hdfs.user"
-
-    fromUnix :: IO User
-    fromUnix = T.pack <$> getEffectiveUserName
-
-getNameNode :: IO NameNode
-getNameNode = attempt [fromHadoopCfg, fromUserCfg] explode
-  where
-    fromHadoopCfg :: IO (Maybe NameNode)
-    fromHadoopCfg = listToMaybe . maybe [] id <$> readHadoopNameNodes
-
-    fromUserCfg :: IO (Maybe NameNode)
-    fromUserCfg = do
-        cfg  <- C.load [Optional configPath]
-        host <- C.lookup cfg "namenode.host"
-        port <- C.lookupDefault 8020 cfg "namenode.port"
-        return (Endpoint <$> host <*> pure port)
-
-    explode :: IO a
-    explode = error $ "could not find namenode details in /etc/hadoop/conf/ or " <> configPath
+getNameNode :: IO (Maybe NameNode)
+getNameNode = do
+    cfg  <- C.load [Optional configPath]
+    host <- C.lookup cfg "namenode.host"
+    port <- C.lookupDefault 8020 cfg "namenode.port"
+    return (Endpoint <$> host <*> pure port)
 
 getSocksProxy :: IO (Maybe SocksProxy)
 getSocksProxy = do
@@ -108,64 +95,6 @@ getSocksProxy = do
     case mhost of
         Nothing   -> return Nothing
         Just host -> Just . Endpoint host <$> C.lookupDefault 1080 cfg "proxy.port"
-
-attempt :: Monad m => [m (Maybe a)] -> m a -> m a
-attempt [] def     = def
-attempt (io:ios) def = io >>= \mx -> case mx of
-    Just x  -> return x
-    Nothing -> attempt ios def
-
-------------------------------------------------------------------------
-
-type HadoopConfig = H.HashMap Text Text
-
-readHadoopNameNodes :: IO (Maybe [NameNode])
-readHadoopNameNodes = do
-    cfg <- H.union <$> readHadoopConfig "/etc/hadoop/conf/core-site.xml"
-                   <*> readHadoopConfig "/etc/hadoop/conf/hdfs-site.xml"
-    return $ resolveNameNode cfg <$> (stripProto =<< H.lookup fsDefaultNameKey cfg)
-  where
-    proto            = "hdfs://"
-    fsDefaultNameKey = "fs.defaultFS"
-    nameNodesPrefix  = "dfs.ha.namenodes."
-    rpcAddressPrefix = "dfs.namenode.rpc-address."
-
-    stripProto :: Text -> Maybe Text
-    stripProto uri | proto `T.isPrefixOf` uri = Just (T.drop (T.length proto) uri)
-                   | otherwise                = Nothing
-
-    resolveNameNode :: HadoopConfig -> Text -> [NameNode]
-    resolveNameNode cfg name = case parseEndpoint name of
-        Just ep -> [ep] -- contains "host:port" directly
-        Nothing -> mapMaybe (\nn -> lookupAddress cfg $ name <> "." <> nn)
-                            (lookupNameNodes cfg name)
-
-    lookupNameNodes :: HadoopConfig -> Text -> [Text]
-    lookupNameNodes cfg name = maybe [] id
-                             $ T.splitOn "," <$> H.lookup (nameNodesPrefix <> name) cfg
-
-    lookupAddress :: HadoopConfig -> Text -> Maybe Endpoint
-    lookupAddress cfg name = parseEndpoint =<< H.lookup (rpcAddressPrefix <> name) cfg
-
-    parseEndpoint :: Text -> Maybe Endpoint
-    parseEndpoint ep = Endpoint host <$> port
-      where
-        host = T.takeWhile (/= ':') ep
-        port = either (const Nothing) (Just . fst)
-             $ T.decimal $ T.drop (T.length host + 1) ep
-
-readHadoopConfig :: FilePath -> IO HadoopConfig
-readHadoopConfig path = do
-    exml <- parseXML path <$> B.readFile path
-    case exml of
-      Left  _   -> return H.empty
-      Right xml -> return (toHashMap (docContent xml))
-  where
-    toHashMap = H.fromList . mapMaybe fromNode
-              . concatMap (descendantElementsTag "property")
-
-    fromNode n = (,) <$> (nodeText <$> childElementTag "name" n)
-                     <*> (nodeText <$> childElementTag "value" n)
 
 ------------------------------------------------------------------------
 
@@ -176,7 +105,7 @@ workingDirConfigPath = unsafePerformIO $ do
 {-# NOINLINE workingDirConfigPath #-}
 
 getDefaultWorkingDir :: MonadIO m => m FilePath
-getDefaultWorkingDir = liftIO $ (("/user" </>) . T.unpack) <$> getHdfsUser
+getDefaultWorkingDir = liftIO $ (("/user" </>) . T.unpack . hcUser) <$> getConfig
 
 getWorkingDir :: MonadIO m => m FilePath
 getWorkingDir = liftIO $ handle onError
@@ -202,7 +131,7 @@ normalizePath = intercalate "/" . dropAbsParentDir . splitOn "/"
 
 dropAbsParentDir :: [FilePath] -> [FilePath]
 dropAbsParentDir []       = error "dropAbsParentDir: not an absolute path"
-dropAbsParentDir (p : ps) = p : (reverse $ fst $ go [] ps)
+dropAbsParentDir (p : ps) = p : reverse (fst $ go [] ps)
   where
     go []       (".." : ys) = go [] ys
     go (_ : xs) (".." : ys) = go xs ys
@@ -214,13 +143,13 @@ dropAbsParentDir (p : ps) = p : (reverse $ fst $ go [] ps)
 data SubCommand = SubCommand
     { subName :: String
     , subDescription :: String
-    , subMethod :: Parser (Remote ())
+    , subMethod :: Parser (Hdfs ())
     }
 
-sub :: SubCommand -> Mod CommandFields (Remote ())
+sub :: SubCommand -> Mod CommandFields (Hdfs ())
 sub SubCommand{..} = command subName (info subMethod $ progDesc subDescription)
 
-options :: Parser (Remote ())
+options :: Parser (Hdfs ())
 options = subparser (foldMap sub allSubCommands)
 
 allSubCommands :: [SubCommand]
@@ -256,12 +185,12 @@ subDiskUsage :: SubCommand
 subDiskUsage = SubCommand "du" "Show the amount of space used by file or directory" go
   where
     go = du <$> optional (argument str (completePath <> help "the file/directory to check the usage of"))
-    du path = printDiskUsage =<< getAbsolute (maybe "" id path)
+    du path = printDiskUsage =<< getAbsolute (fromMaybe "" path)
 
 subList :: SubCommand
 subList = SubCommand "ls" "List the contents of a directory" go
   where
-    go = ls <$> (optional (argument str (completeDir <> help "the directory to list")))
+    go = ls <$> optional (argument str (completeDir <> help "the directory to list"))
     ls path = printListing =<< getAbsolute (fromMaybe "" path)
 
 subMkDir :: SubCommand
@@ -309,15 +238,15 @@ subVersion = SubCommand "version" "Show version information" go
 ------------------------------------------------------------------------
 
 fileCompletion :: (FileType -> Bool) -> Completer
-fileCompletion p = mkCompleter $ \path -> handle ignore $ runRemote $ do
+fileCompletion p = mkCompleter $ \path -> handle ignore $ runHdfs $ do
     let (dir, _) = splitFileName' path
-    ls <- getListing =<< getAbsolute dir
+    ls <- getListing' =<< getAbsolute dir
 
-    return $ filter (path `isPrefixOf`)
-           . map (displayPath dir)
-           . filter (p . get fsFileType)
-           . concatMap (get dlPartialListing)
-           . maybeToList  $ ls
+    return $ V.toList
+           . V.filter (path `isPrefixOf`)
+           . V.map (displayPath dir)
+           . V.filter (p . get fsFileType)
+           $ ls
   where
     ignore (RemoteError _ _) = return []
 
@@ -334,25 +263,24 @@ displayPath parent file = parent </> B.unpack (get fsPath file) <> suffix
 
 ------------------------------------------------------------------------
 
-printDiskUsage :: FilePath -> Remote ()
+printDiskUsage :: FilePath -> Hdfs ()
 printDiskUsage path = do
     mls <- getListing path
     case mls of
       Nothing -> liftIO $ putStrLn $ "File/directory does not exist: " <> path
       Just ls -> do
-        let files = map (displayPath path) (get dlPartialListing ls)
-        css <- zip files <$> mapM getDirSize files
+        let files = V.map (displayPath path) ls
+        css <- V.zip files <$> V.mapM getDirSize files
 
-        let col a f = vcat a (map (text . f) css)
+        let col a f = vcat a (map (text . f) (V.toList css))
 
-        liftIO $ do
-            printBox $ col right snd
-                   <+> col left  fst
+        liftIO $ printBox $ col right snd
+                        <+> col left  fst
   where
-    getDirSize f = handleC (\e -> if isAccessDenied e then return "-" else liftIO (throwIO e))
-                           (formatSize . get csLength <$> getContentSummary f)
+    getDirSize f = handle (\e -> if isAccessDenied e then return "-" else throwM e)
+                          (formatSize . get csLength <$> getContentSummary f)
 
-printListing :: FilePath -> Remote ()
+printListing :: FilePath -> Hdfs ()
 printListing path = do
     mls <- getListing path
     case mls of
@@ -365,11 +293,10 @@ printListing path = do
             getModTime   = hdfs2utc . get fsModificationTime
 
             -- TODO: Fetch rest of partial listing
-            xs      = get dlPartialListing ls
-            col a f = vcat a (map (text . f) xs)
+            col a f = vcat a (map (text . f) (V.toList ls))
 
         liftIO $ do
-            putStrLn $ "Found " <> show (length xs) <> " items"
+            putStrLn $ "Found " <> show (V.length ls) <> " items"
 
             printBox $ col left  (\x -> formatMode (get fsFileType x) (getPerms x))
                    <+> col right (formatBlockRepl . getBlockRepl)
