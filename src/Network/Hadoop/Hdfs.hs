@@ -132,8 +132,8 @@ getListing path = do
             sa  = getField . fsPath $ V.last p
 
         if hasRemainingEntries dirList
-           then return (V.concat ps')
-           else loop ps' sa
+           then loop ps' sa
+           else return (V.concat ps')
 
     emptyListing = DirectoryListing (putField []) (putField 0)
 
