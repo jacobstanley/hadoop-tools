@@ -8,7 +8,7 @@ module Network.Hadoop.Stream
     , mkSocketStream
     , mkEchoStream
     , parse
-    , runGet
+    , maybeGet
     , runPut
     , write
     , close
@@ -105,8 +105,8 @@ parse stream parser = do
                 Just bs -> go (f bs) False
     go (Atto.Fail _ _ err) _ = error ("parse: " ++ err)
 
-runGet :: Stream -> Get.Get a -> IO (Maybe a)
-runGet stream getter = do
+maybeGet :: Stream -> Get.Get a -> IO (Maybe a)
+maybeGet stream getter = do
     state <- readIORef (streamState stream)
     case state of
         Closed remainder
