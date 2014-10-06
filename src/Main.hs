@@ -7,20 +7,18 @@ import           Control.Exception (SomeException)
 import           Control.Monad
 import           Control.Monad.Catch (handle, throwM)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
-
 import           Data.Bits ((.&.), shiftR)
+import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as B
 import           Data.Foldable (foldMap)
-import           Data.List (intercalate, isPrefixOf)
-import           Data.List.Split (splitOn)
 import           Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
 import           Data.Time
 import           Data.Time.Clock.POSIX
-import           Data.Word (Word16, Word32, Word64)
 import qualified Data.Vector as V
+import           Data.Word (Word16, Word32, Word64)
 
 import qualified Data.Configurator as C
 import           Data.Configurator.Types (Worth(..))
@@ -28,7 +26,7 @@ import           System.Environment (getEnv)
 import           System.FilePath.Posix
 import           System.IO.Unsafe (unsafePerformIO)
 import           System.Locale (defaultTimeLocale)
-import           Text.PrettyPrint.Boxes hiding ((<>))
+import           Text.PrettyPrint.Boxes hiding ((<>), (//))
 
 import           Data.Hadoop.Configuration (getHadoopConfig)
 import           Data.Hadoop.Protobuf.Hdfs
@@ -104,32 +102,32 @@ workingDirConfigPath = unsafePerformIO $ do
     return (home </> ".hhwd")
 {-# NOINLINE workingDirConfigPath #-}
 
-getDefaultWorkingDir :: MonadIO m => m FilePath
-getDefaultWorkingDir = liftIO $ (("/user" </>) . T.unpack . hcUser) <$> getConfig
+getDefaultWorkingDir :: MonadIO m => m HdfsPath
+getDefaultWorkingDir = liftIO $ (("/user" //) . T.encodeUtf8 . hcUser) <$> getConfig
 
-getWorkingDir :: MonadIO m => m FilePath
+getWorkingDir :: MonadIO m => m HdfsPath
 getWorkingDir = liftIO $ handle onError
-                       $ T.unpack . T.takeWhile (/= '\n')
-                     <$> T.readFile workingDirConfigPath
+                       $ B.takeWhile (/= '\n')
+                     <$> B.readFile workingDirConfigPath
   where
-    onError :: SomeException -> IO FilePath
+    onError :: SomeException -> IO HdfsPath
     onError = const getDefaultWorkingDir
 
-setWorkingDir :: MonadIO m => FilePath -> m ()
-setWorkingDir path = liftIO $ T.writeFile workingDirConfigPath
-                            $ T.pack path <> "\n"
+setWorkingDir :: MonadIO m => HdfsPath -> m ()
+setWorkingDir path = liftIO $ B.writeFile workingDirConfigPath
+                            $ path <> "\n"
 
-getAbsolute :: MonadIO m => FilePath -> m FilePath
+getAbsolute :: MonadIO m => HdfsPath -> m HdfsPath
 getAbsolute path = liftIO (normalizePath <$> getPath)
   where
-    getPath = if "/" `isPrefixOf` path
+    getPath = if "/" `B.isPrefixOf` path
               then return path
-              else getWorkingDir >>= \pwd -> return (pwd </> path)
+              else getWorkingDir >>= \pwd -> return (pwd // path)
 
-normalizePath :: FilePath -> FilePath
-normalizePath = intercalate "/" . dropAbsParentDir . splitOn "/"
+normalizePath :: HdfsPath -> HdfsPath
+normalizePath = B.intercalate "/" . dropAbsParentDir . B.split '/'
 
-dropAbsParentDir :: [FilePath] -> [FilePath]
+dropAbsParentDir :: [HdfsPath] -> [HdfsPath]
 dropAbsParentDir []       = error "dropAbsParentDir: not an absolute path"
 dropAbsParentDir (p : ps) = p : reverse (fst $ go [] ps)
   where
@@ -170,65 +168,66 @@ completePath = completer (fileCompletion (const True)) <> metavar "PATH"
 completeDir :: Mod ArgumentFields a
 completeDir  = completer (fileCompletion (== Dir)) <> metavar "DIRECTORY"
 
+bstr :: Monad m => String -> m ByteString
+bstr x = str x >>= return . B.pack
+
 subChDir :: SubCommand
 subChDir = SubCommand "cd" "Change working directory" go
   where
-    go = cd <$> optional (argument str (completeDir <> help "the directory to change to"))
+    go = cd <$> optional (argument bstr (completeDir <> help "the directory to change to"))
     cd mpath = do
         path <- getAbsolute =<< maybe getDefaultWorkingDir return mpath
-        mls <- getListing path
-        liftIO $ case mls of
-            Nothing -> putStrLn $ "Directory does not exist: " <> path
-            Just _  -> setWorkingDir path
+        _ <- getListingOrFail path
+        setWorkingDir path
 
 subDiskUsage :: SubCommand
 subDiskUsage = SubCommand "du" "Show the amount of space used by file or directory" go
   where
-    go = du <$> optional (argument str (completePath <> help "the file/directory to check the usage of"))
+    go = du <$> optional (argument bstr (completePath <> help "the file/directory to check the usage of"))
     du path = printDiskUsage =<< getAbsolute (fromMaybe "" path)
 
 subList :: SubCommand
 subList = SubCommand "ls" "List the contents of a directory" go
   where
-    go = ls <$> optional (argument str (completeDir <> help "the directory to list"))
+    go = ls <$> optional (argument bstr (completeDir <> help "the directory to list"))
     ls path = printListing =<< getAbsolute (fromMaybe "" path)
 
 subMkDir :: SubCommand
 subMkDir = SubCommand "mkdir" "Create a directory in the specified location" go
   where
-    go = mkdir <$> argument str (completeDir       <> help "the directory to create")
-               <*> switch       (short 'p' <> help "create intermediate directories")
+    go = mkdir <$> argument bstr (completeDir <> help "the directory to create")
+               <*> switch        (short 'p' <> help "create intermediate directories")
     mkdir path parent =  do
       absPath <- getAbsolute path
-      ok <- mkdirs absPath parent
-      unless ok $ liftIO . putStrLn $ "Failed to create: " <> absPath
+      ok <- mkdirs parent absPath
+      unless ok $ liftIO . B.putStrLn $ "Failed to create: " <> absPath
 
 subPwd :: SubCommand
 subPwd = SubCommand "pwd" "Print working directory" go
   where
     go = pure pwd
-    pwd = liftIO . putStrLn =<< getWorkingDir
+    pwd = liftIO . B.putStrLn =<< getWorkingDir
 
 subRemove :: SubCommand
 subRemove = SubCommand "rm" "Delete a file or directory" go
   where
-    go = rm <$> argument str (completePath      <> help "the file/directory to remove")
-            <*> switch       (short 'r' <> help "recursively remove the whole file hierarchy")
+    go = rm <$> argument bstr (completePath <> help "the file/directory to remove")
+            <*> switch        (short 'r' <> help "recursively remove the whole file hierarchy")
     rm path recursive = do
       absPath <- getAbsolute path
-      ok <- delete absPath recursive
-      unless ok $ liftIO . putStrLn $ "Failed to remove: " <> absPath
+      ok <- delete recursive absPath
+      unless ok $ liftIO . B.putStrLn $ "Failed to remove: " <> absPath
 
 subRename :: SubCommand
 subRename = SubCommand "mv" "Rename a file or directory" go
   where
-    go = mv <$> argument str (completePath      <> help "source file/directory")
-            <*> argument str (completePath      <> help "destination file/directory")
-            <*> switch       (short 'f' <> help "overwrite destination if it exists")
+    go = mv <$> argument bstr (completePath <> help "source file/directory")
+            <*> argument bstr (completePath <> help "destination file/directory")
+            <*> switch        (short 'f' <> help "overwrite destination if it exists")
     mv src dst force = do
       absSrc <- getAbsolute src
       absDst <- getAbsolute dst
-      rename absSrc absDst force
+      rename force absSrc absDst
 
 subVersion :: SubCommand
 subVersion = SubCommand "version" "Show version information" go
@@ -238,12 +237,15 @@ subVersion = SubCommand "version" "Show version information" go
 ------------------------------------------------------------------------
 
 fileCompletion :: (FileType -> Bool) -> Completer
-fileCompletion p = mkCompleter $ \path -> handle ignore $ runHdfs $ do
-    let (dir, _) = splitFileName' path
+fileCompletion p = mkCompleter $ \spath -> handle ignore $ runHdfs $ do
+    let dir  = B.pack $ fst $ splitFileName' spath
+        path = B.pack spath
+
     ls <- getListing' =<< getAbsolute dir
 
     return $ V.toList
-           . V.filter (path `isPrefixOf`)
+           . V.map B.unpack
+           . V.filter (path `B.isPrefixOf`)
            . V.map (displayPath dir)
            . V.filter (p . get fsFileType)
            $ ls
@@ -254,8 +256,8 @@ fileCompletion p = mkCompleter $ \path -> handle ignore $ runHdfs $ do
         ("./", f) -> ("", f)
         (d, f)    -> (d, f)
 
-displayPath :: FilePath -> FileStatus -> FilePath
-displayPath parent file = parent </> B.unpack (get fsPath file) <> suffix
+displayPath :: HdfsPath -> FileStatus -> HdfsPath
+displayPath parent file = parent // get fsPath file <> suffix
   where
     suffix = case get fsFileType file of
         Dir -> "/"
@@ -263,48 +265,43 @@ displayPath parent file = parent </> B.unpack (get fsPath file) <> suffix
 
 ------------------------------------------------------------------------
 
-printDiskUsage :: FilePath -> Hdfs ()
+printDiskUsage :: HdfsPath -> Hdfs ()
 printDiskUsage path = do
-    mls <- getListing path
-    case mls of
-      Nothing -> liftIO $ putStrLn $ "File/directory does not exist: " <> path
-      Just ls -> do
-        let files = V.map (displayPath path) ls
-        css <- V.zip files <$> V.mapM getDirSize files
+    ls <- getListingOrFail path
 
-        let col a f = vcat a (map (text . f) (V.toList css))
+    let files = V.map (displayPath path) ls
+    css <- V.zip files <$> V.mapM getDirSize files
 
-        liftIO $ printBox $ col right snd
-                        <+> col left  fst
+    let col a f = vcat a (map (text . f) (V.toList css))
+
+    liftIO $ printBox $ col right snd
+                    <+> col left  (B.unpack . fst)
   where
     getDirSize f = handle (\e -> if isAccessDenied e then return "-" else throwM e)
                           (formatSize . get csLength <$> getContentSummary f)
 
-printListing :: FilePath -> Hdfs ()
+printListing :: HdfsPath -> Hdfs ()
 printListing path = do
-    mls <- getListing path
-    case mls of
-      Nothing -> liftIO . putStrLn $ "Directory does not exist: " <> path
-      Just ls -> do
-        let getPerms     = fromIntegral . get fpPerm . get fsPermission
-            getBlockRepl = fromMaybe 0 . get fsBlockReplication
+    ls <- getListingOrFail path
 
-            hdfs2utc ms  = posixSecondsToUTCTime (fromIntegral ms / 1000)
-            getModTime   = hdfs2utc . get fsModificationTime
+    let getPerms     = fromIntegral . get fpPerm . get fsPermission
+        getBlockRepl = fromMaybe 0 . get fsBlockReplication
 
-            -- TODO: Fetch rest of partial listing
-            col a f = vcat a (map (text . f) (V.toList ls))
+        hdfs2utc ms  = posixSecondsToUTCTime (fromIntegral ms / 1000)
+        getModTime   = hdfs2utc . get fsModificationTime
 
-        liftIO $ do
-            putStrLn $ "Found " <> show (V.length ls) <> " items"
+        col a f = vcat a (map (text . f) (V.toList ls))
 
-            printBox $ col left  (\x -> formatMode (get fsFileType x) (getPerms x))
-                   <+> col right (formatBlockRepl . getBlockRepl)
-                   <+> col left  (T.unpack . get fsOwner)
-                   <+> col left  (T.unpack . get fsGroup)
-                   <+> col right (formatSize . get fsLength)
-                   <+> col right (formatUTC . getModTime)
-                   <+> col left  (T.unpack . T.decodeUtf8 . get fsPath)
+    liftIO $ do
+        putStrLn $ "Found " <> show (V.length ls) <> " items"
+
+        printBox $ col left  (\x -> formatMode (get fsFileType x) (getPerms x))
+               <+> col right (formatBlockRepl . getBlockRepl)
+               <+> col left  (T.unpack . get fsOwner)
+               <+> col left  (T.unpack . get fsGroup)
+               <+> col right (formatSize . get fsLength)
+               <+> col right (formatUTC . getModTime)
+               <+> col left  (T.unpack . T.decodeUtf8 . get fsPath)
 
 ------------------------------------------------------------------------
 
@@ -351,8 +348,9 @@ formatPerms perms = format (perms `shiftR` 6)
 
 printError :: RemoteError -> IO ()
 printError (RemoteError subject body)
-    | oneLiner  = T.putStrLn firstLine
-    | otherwise = T.putStrLn subject >> T.putStrLn body
+    | oneLiner    = T.putStrLn firstLine
+    | T.null body = T.putStrLn subject
+    | otherwise   = T.putStrLn subject >> T.putStrLn body
   where
     oneLiner  = subject `elem` [ "org.apache.hadoop.security.AccessControlException"
                                , "org.apache.hadoop.fs.FileAlreadyExistsException"
@@ -361,3 +359,25 @@ printError (RemoteError subject body)
 
 isAccessDenied :: RemoteError -> Bool
 isAccessDenied (RemoteError s _) = s == "org.apache.hadoop.security.AccessControlException"
+
+------------------------------------------------------------------------
+
+infixr 5 //
+
+(//) :: HdfsPath -> HdfsPath -> HdfsPath
+(//) xs ys | B.isPrefixOf "/" ys = ys
+           | otherwise           = trimEnd '/' xs <> "/" <> ys
+
+trimEnd :: Char -> ByteString -> ByteString
+trimEnd b bs | B.null bs      = B.empty
+             | B.last bs == b = trimEnd b (B.init bs)
+             | otherwise      = bs
+
+------------------------------------------------------------------------
+
+getListingOrFail :: HdfsPath -> Hdfs (V.Vector FileStatus)
+getListingOrFail path = do
+    mls <- getListing False path
+    case mls of
+      Nothing -> throwM $ RemoteError ("File/directory does not exist: " <> T.decodeUtf8 path) T.empty
+      Just ls -> return ls
