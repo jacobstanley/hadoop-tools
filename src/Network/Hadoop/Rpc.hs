@@ -40,7 +40,7 @@ import           Network.Socket (Socket)
 
 data Connection = Connection
     { cnVersion  :: !Int
-    , cnUser     :: !User
+    , cnConfig   :: !HadoopConfig
     , cnProtocol :: !Protocol
     , invokeRaw  :: !(Method -> RawRequest -> IO RawResponse)
     }
@@ -59,8 +59,8 @@ type RawResponse = ByteString
 -- hadoop-2.1.0-beta is on version 9
 -- see https://issues.apache.org/jira/browse/HADOOP-8990 for differences
 
-initConnectionV7 :: User -> Protocol -> Socket -> IO Connection
-initConnectionV7 user protocol sock = do
+initConnectionV7 :: HadoopConfig -> Protocol -> Socket -> IO Connection
+initConnectionV7 config@HadoopConfig{..} protocol sock = do
     stream <- S.mkSocketStream sock
     S.runPut stream $ do
         putByteString "hrpc"
@@ -73,7 +73,7 @@ initConnectionV7 user protocol sock = do
         putByteString bs
 
     ref <- newIORef 0
-    return (Connection 7 user protocol (sendAndWait stream ref))
+    return (Connection 7 config protocol (sendAndWait stream ref))
   where
     sendAndWait :: S.Stream -> IORef Int -> Method -> ByteString -> IO ByteString
     sendAndWait stream ref method requestBytes = do
@@ -95,7 +95,7 @@ initConnectionV7 user protocol sock = do
     context = IpcConnectionContext
         { ctxProtocol = putField (Just (prName protocol))
         , ctxUserInfo = putField (Just UserInformation
-            { effectiveUser = putField (Just user)
+            { effectiveUser = putField (Just hcUser)
             , realUser      = mempty
             })
         }
