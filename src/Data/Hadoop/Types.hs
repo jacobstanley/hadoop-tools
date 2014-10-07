@@ -7,6 +7,7 @@ import           Data.ByteString (ByteString)
 import           Data.Data (Data)
 import           Data.Text (Text)
 import           Data.Typeable (Typeable)
+import qualified Data.Vector as V
 import           Data.Word (Word16, Word64)
 
 ------------------------------------------------------------------------
@@ -68,6 +69,12 @@ data ContentSummary = ContentSummary
     , csQuota          :: !Word64
     , csSpaceConsumed  :: !Word64
     , csSpaceQuota     :: !Word64
+    } deriving (Eq, Ord, Show)
+
+-- | Partial directory listing.
+data PartialListing = PartialListing
+    { lsRemaining :: !Int -- ^ number of files left to fetch
+    , lsFiles     :: !(V.Vector FileStatus)
     } deriving (Eq, Ord, Show)
 
 -- | Status of a file, directory or symbolic link.

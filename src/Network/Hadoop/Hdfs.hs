@@ -116,46 +116,32 @@ getListing :: HdfsPath -> Hdfs (Maybe (V.Vector FileStatus))
 getListing path = do
     mDirList <- getPartialListing path ""
     case mDirList of
-      Nothing -> return Nothing
-      Just dirList -> do
-        let p = partialListing dirList
-        if hasRemainingEntries dirList
-           then Just <$> loop [p] (lastFileName p)
-           else return (Just p)
+      Nothing                    -> return Nothing
+      Just (PartialListing 0 fs) -> return (Just fs)
+      Just (PartialListing _ fs) -> Just <$> loop [fs] (lastFileName fs)
   where
-    partialListing :: P.DirectoryListing -> V.Vector FileStatus
-    partialListing = V.map fromProtoFileStatus
-                   . V.fromList
-                   . getField
-                   . P.dlPartialListing
-
-    hasRemainingEntries :: P.DirectoryListing -> Bool
-    hasRemainingEntries = (/= 0) . getField . P.dlRemaingEntries
-
     lastFileName :: V.Vector FileStatus -> ByteString
     lastFileName v | V.null v  = ""
-                   | otherwise = fsPath . V.last $ v
+                   | otherwise = fsPath (V.last v)
 
     loop :: [V.Vector FileStatus] -> ByteString -> Hdfs (V.Vector FileStatus)
     loop ps startAfter = do
-        dirList <- fromMaybe emptyListing <$> getPartialListing path startAfter
+        PartialListing{..} <- fromMaybe (PartialListing 0 V.empty)
+                          <$> getPartialListing path startAfter
 
-        let p   = partialListing dirList
-            ps' = ps ++ [p]
+        let ps' = ps ++ [lsFiles]
 
-        if hasRemainingEntries dirList
-           then loop ps' (lastFileName p)
-           else return (V.concat ps')
-
-    emptyListing = P.DirectoryListing (putField []) (putField 0)
+        if lsRemaining == 0
+           then return (V.concat ps')
+           else loop ps' (lastFileName lsFiles)
 
 getListing' :: HdfsPath -> Hdfs (V.Vector FileStatus)
 getListing' path = fromMaybe V.empty <$> getListing path
 
 ------------------------------------------------------------------------
 
-getPartialListing :: HdfsPath -> ByteString -> Hdfs (Maybe P.DirectoryListing)
-getPartialListing path startAfter = getField . P.lsDirList <$>
+getPartialListing :: HdfsPath -> HdfsPath -> Hdfs (Maybe PartialListing)
+getPartialListing path startAfter = fmap fromProtoDirectoryListing . getField . P.lsDirList <$>
     hdfsInvoke "getListing" P.GetListingRequest
     { P.lsSrc          = putField (T.decodeUtf8 path)
     , P.lsStartAfter   = putField startAfter
@@ -223,19 +209,25 @@ fromProtoContentSummary p = ContentSummary
     , csSpaceQuota     = getField $ P.csSpaceQuota p
     }
 
+fromProtoDirectoryListing :: P.DirectoryListing -> PartialListing
+fromProtoDirectoryListing p = PartialListing
+    { lsRemaining = fromIntegral . getField $ P.dlRemaingEntries p
+    , lsFiles     = V.map fromProtoFileStatus . V.fromList . getField $ P.dlPartialListing p
+    }
+
 fromProtoFileStatus :: P.FileStatus -> FileStatus
 fromProtoFileStatus p = FileStatus
-    { fsFileType         = fromProtoFileType $ getField $ P.fsFileType p
+    { fsFileType         = fromProtoFileType . getField $ P.fsFileType p
     , fsPath             = getField $ P.fsPath p
     , fsLength           = getField $ P.fsLength p
-    , fsPermission       = fromIntegral $ getField $ P.fpPerm $ getField $ P.fsPermission p
+    , fsPermission       = fromIntegral . getField . P.fpPerm . getField $ P.fsPermission p
     , fsOwner            = getField $ P.fsOwner p
     , fsGroup            = getField $ P.fsGroup p
     , fsModificationTime = getField $ P.fsModificationTime p
     , fsAccessTime       = getField $ P.fsAccessTime p
     , fsSymLink          = getField $ P.fsSymLink p
-    , fsBlockReplication = fromIntegral $ fromMaybe 0 $ getField $ P.fsBlockReplication p
-    , fsBlockSize        = fromMaybe 0 $ getField $ P.fsBlockSize p
+    , fsBlockReplication = fromIntegral . fromMaybe 0 . getField $ P.fsBlockReplication p
+    , fsBlockSize        = fromMaybe 0 . getField $ P.fsBlockSize p
     }
 
 fromProtoFileType :: P.FileType -> FileType
