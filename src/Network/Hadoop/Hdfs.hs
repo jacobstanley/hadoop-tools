@@ -90,7 +90,7 @@ runHdfs hdfs = do
     runHdfs' config hdfs
 
 runHdfs' :: HadoopConfig -> Hdfs a -> IO a
-runHdfs' HadoopConfig{..} hdfs = runSession session
+runHdfs' HadoopConfig{..} hdfs = S.runTcp hcProxy nameNode session
   where
     session socket = do
         conn <- initConnectionV7 hcUser hdfsProtocol socket
@@ -99,10 +99,6 @@ runHdfs' HadoopConfig{..} hdfs = runSession session
     nameNode = case hcNameNodes of
         []    -> throw (ConfigError "Could not find name nodes in Hadoop configuration")
         (x:_) -> x
-
-    runSession = case hcProxy of
-        Nothing    -> S.runTcp nameNode
-        Just proxy -> S.runSocks proxy nameNode
 
 hdfsInvoke :: (Decode b, Encode a) => Text -> a -> Hdfs b
 hdfsInvoke method arg = Hdfs $ \c -> invoke c method arg

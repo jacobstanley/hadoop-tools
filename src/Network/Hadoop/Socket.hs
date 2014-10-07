@@ -3,7 +3,6 @@ module Network.Hadoop.Socket
     , S.SockAddr(..)
 
     , runTcp
-    , runSocks
 
     , connectSocket
     , newSocket
@@ -20,8 +19,12 @@ import           Network.Socks5 (defaultSocksConf, socksConnectWith)
 
 ------------------------------------------------------------------------
 
-runTcp :: Endpoint -> (S.Socket -> IO a) -> IO a
-runTcp endpoint = bracket (fst <$> connectSocket endpoint) closeSocket
+runTcp :: Maybe SocksProxy -> Endpoint -> (S.Socket -> IO a) -> IO a
+runTcp Nothing      = runTcp'
+runTcp (Just proxy) = runSocks proxy
+
+runTcp' :: Endpoint -> (S.Socket -> IO a) -> IO a
+runTcp' endpoint = bracket (fst <$> connectSocket endpoint) closeSocket
 
 runSocks :: SocksProxy -> Endpoint -> (S.Socket -> IO a) -> IO a
 runSocks proxy endpoint = bracket (socksConnectWith proxyConf host port) closeSocket
