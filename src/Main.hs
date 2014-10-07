@@ -42,7 +42,9 @@ import           Paths_hadoop_tools (version)
 main :: IO ()
 main = do
     cmd <- execParser optsParser
-    handle printError (runHdfs cmd)
+    case cmd of
+      SubIO   io   -> io
+      SubHdfs hdfs -> handle printError (runHdfs hdfs)
   where
     optsParser = info (helper <*> options)
                       (fullDesc <> header "hh - Blazing fast interaction with HDFS")
@@ -137,15 +139,18 @@ dropAbsParentDir (p : ps) = p : reverse (fst $ go [] ps)
 ------------------------------------------------------------------------
 
 data SubCommand = SubCommand
-    { subName :: String
+    { subName        :: String
     , subDescription :: String
-    , subMethod :: Parser (Hdfs ())
+    , subMethod      :: Parser SubMethod
     }
 
-sub :: SubCommand -> Mod CommandFields (Hdfs ())
+data SubMethod = SubIO   (IO ())
+               | SubHdfs (Hdfs ())
+
+sub :: SubCommand -> Mod CommandFields SubMethod
 sub SubCommand{..} = command subName (info subMethod $ progDesc subDescription)
 
-options :: Parser (Hdfs ())
+options :: Parser SubMethod
 options = subparser (foldMap sub allSubCommands)
 
 allSubCommands :: [SubCommand]
@@ -173,7 +178,7 @@ subChDir :: SubCommand
 subChDir = SubCommand "cd" "Change working directory" go
   where
     go = cd <$> optional (argument bstr (completeDir <> help "the directory to change to"))
-    cd mpath = do
+    cd mpath = SubHdfs $ do
         path <- getAbsolute =<< maybe getDefaultWorkingDir return mpath
         _ <- getListingOrFail path
         setWorkingDir path
@@ -182,20 +187,20 @@ subDiskUsage :: SubCommand
 subDiskUsage = SubCommand "du" "Show the amount of space used by file or directory" go
   where
     go = du <$> optional (argument bstr (completePath <> help "the file/directory to check the usage of"))
-    du path = printDiskUsage =<< getAbsolute (fromMaybe "" path)
+    du path = SubHdfs $ printDiskUsage =<< getAbsolute (fromMaybe "" path)
 
 subList :: SubCommand
 subList = SubCommand "ls" "List the contents of a directory" go
   where
     go = ls <$> optional (argument bstr (completeDir <> help "the directory to list"))
-    ls path = printListing =<< getAbsolute (fromMaybe "" path)
+    ls path = SubHdfs $ printListing =<< getAbsolute (fromMaybe "" path)
 
 subMkDir :: SubCommand
 subMkDir = SubCommand "mkdir" "Create a directory in the specified location" go
   where
     go = mkdir <$> argument bstr (completeDir <> help "the directory to create")
                <*> switch        (short 'p' <> help "create intermediate directories")
-    mkdir path parent =  do
+    mkdir path parent = SubHdfs $ do
       absPath <- getAbsolute path
       ok <- mkdirs parent absPath
       unless ok $ liftIO . B.putStrLn $ "Failed to create: " <> absPath
@@ -203,15 +208,14 @@ subMkDir = SubCommand "mkdir" "Create a directory in the specified location" go
 subPwd :: SubCommand
 subPwd = SubCommand "pwd" "Print working directory" go
   where
-    go = pure pwd
-    pwd = liftIO . B.putStrLn =<< getWorkingDir
+    go = pure $ SubIO $ B.putStrLn =<< getWorkingDir
 
 subRemove :: SubCommand
 subRemove = SubCommand "rm" "Delete a file or directory" go
   where
     go = rm <$> argument bstr (completePath <> help "the file/directory to remove")
             <*> switch        (short 'r' <> help "recursively remove the whole file hierarchy")
-    rm path recursive = do
+    rm path recursive = SubHdfs $ do
       absPath <- getAbsolute path
       ok <- delete recursive absPath
       unless ok $ liftIO . B.putStrLn $ "Failed to remove: " <> absPath
@@ -222,7 +226,7 @@ subRename = SubCommand "mv" "Rename a file or directory" go
     go = mv <$> argument bstr (completePath <> help "source file/directory")
             <*> argument bstr (completePath <> help "destination file/directory")
             <*> switch        (short 'f' <> help "overwrite destination if it exists")
-    mv src dst force = do
+    mv src dst force = SubHdfs $ do
       absSrc <- getAbsolute src
       absDst <- getAbsolute dst
       rename force absSrc absDst
@@ -230,7 +234,7 @@ subRename = SubCommand "mv" "Rename a file or directory" go
 subVersion :: SubCommand
 subVersion = SubCommand "version" "Show version information" go
   where
-    go = pure $ liftIO $ putStrLn $ "hh version " <> showVersion version
+    go = pure $ SubIO $ putStrLn $ "hh version " <> showVersion version
 
 ------------------------------------------------------------------------
 
