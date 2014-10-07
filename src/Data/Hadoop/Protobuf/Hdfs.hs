@@ -3,6 +3,7 @@
 
 module Data.Hadoop.Protobuf.Hdfs where
 
+import Data.ByteString (ByteString)
 import Data.ProtocolBuffers
 import Data.ProtocolBuffers.Orphans ()
 import Data.Text (Text)
@@ -10,7 +11,6 @@ import Data.Word (Word32, Word64)
 import GHC.Generics (Generic)
 
 import Data.Hadoop.Protobuf.Security
-import Data.Hadoop.Types
 
 ------------------------------------------------------------------------
 
@@ -44,7 +44,7 @@ instance Decode DirectoryListing
 -- files block locations if requested by client on the RPC call.
 data FileStatus = FileStatus
     { fsFileType         :: Required  1 (Enumeration FileType)
-    , fsPath             :: Required  2 (Value HdfsPath) -- ^ local name of inode (encoded java utf8)
+    , fsPath             :: Required  2 (Value ByteString) -- ^ local name of inode (encoded java utf8)
     , fsLength           :: Required  3 (Value Word64)
     , fsPermission       :: Required  4 (Message FilePermission)
     , fsOwner            :: Required  5 (Value Text)
@@ -53,7 +53,7 @@ data FileStatus = FileStatus
     , fsAccessTime       :: Required  8 (Value Word64)
 
     -- Optional fields for symlink
-    , fsSymLink          :: Optional  9 (Value HdfsPath) -- ^ if symlink, target (encoded java utf8)
+    , fsSymLink          :: Optional  9 (Value ByteString) -- ^ if symlink, target (encoded java utf8)
 
     -- Optional fields for file
     , fsBlockReplication :: Optional 10 (Value Word32) -- ^ default = 0, only 16bits used
@@ -84,8 +84,7 @@ instance Enum FileType where
 
 ------------------------------------------------------------------------
 
-data ChecksumType =
-    ChecksumNull | ChecksumCRC32 | ChecksumCRC32C
+data ChecksumType = ChecksumNull | ChecksumCRC32 | ChecksumCRC32C
     deriving (Generic, Show, Eq)
 
 instance Enum ChecksumType where
