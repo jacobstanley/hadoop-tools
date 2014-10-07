@@ -6,6 +6,7 @@
 module Network.Hadoop.Hdfs
     ( Hdfs(..)
     , hdfsProtocol
+    , getConnection
     , runHdfs
     , runHdfs'
 
@@ -76,6 +77,9 @@ type Overwrite    = Bool
 type NeedLocation = Bool
 
 ------------------------------------------------------------------------
+
+getConnection :: Hdfs Connection
+getConnection = Hdfs $ return . id
 
 hdfsProtocol :: Protocol
 hdfsProtocol = Protocol "org.apache.hadoop.hdfs.protocol.ClientProtocol" 1
