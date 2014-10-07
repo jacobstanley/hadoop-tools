@@ -18,7 +18,7 @@ import qualified Data.Text.IO as T
 import           Data.Time
 import           Data.Time.Clock.POSIX
 import qualified Data.Vector as V
-import           Data.Word (Word16, Word32, Word64)
+import           Data.Word (Word16, Word64)
 
 import qualified Data.Configurator as C
 import           Data.Configurator.Types (Worth(..))
@@ -29,9 +29,7 @@ import           System.Locale (defaultTimeLocale)
 import           Text.PrettyPrint.Boxes hiding ((<>), (//))
 
 import           Data.Hadoop.Configuration (getHadoopConfig)
-import           Data.Hadoop.Protobuf.Hdfs
 import           Data.Hadoop.Types
-import           Data.ProtocolBuffers (HasField(..), FieldType, getField)
 import           Network.Hadoop.Hdfs hiding (runHdfs)
 
 import           Options.Applicative hiding (Success)
@@ -169,7 +167,7 @@ completeDir :: Mod ArgumentFields a
 completeDir  = completer (fileCompletion (== Dir)) <> metavar "DIRECTORY"
 
 bstr :: Monad m => String -> m ByteString
-bstr x = str x >>= return . B.pack
+bstr x = B.pack `liftM` str x
 
 subChDir :: SubCommand
 subChDir = SubCommand "cd" "Change working directory" go
@@ -247,7 +245,7 @@ fileCompletion p = mkCompleter $ \spath -> handle ignore $ runHdfs $ do
            . V.map B.unpack
            . V.filter (path `B.isPrefixOf`)
            . V.map (displayPath dir)
-           . V.filter (p . get fsFileType)
+           . V.filter (p . fsFileType)
            $ ls
   where
     ignore (RemoteError _ _) = return []
@@ -257,9 +255,9 @@ fileCompletion p = mkCompleter $ \spath -> handle ignore $ runHdfs $ do
         (d, f)    -> (d, f)
 
 displayPath :: HdfsPath -> FileStatus -> HdfsPath
-displayPath parent file = parent // get fsPath file <> suffix
+displayPath parent file = parent // fsPath file <> suffix
   where
-    suffix = case get fsFileType file of
+    suffix = case fsFileType file of
         Dir -> "/"
         _   -> ""
 
@@ -278,39 +276,29 @@ printDiskUsage path = do
                     <+> col left  (B.unpack . fst)
   where
     getDirSize f = handle (\e -> if isAccessDenied e then return "-" else throwM e)
-                          (formatSize . get csLength <$> getContentSummary f)
+                          (formatSize . csLength <$> getContentSummary f)
 
 printListing :: HdfsPath -> Hdfs ()
 printListing path = do
     ls <- getListingOrFail path
 
-    let getPerms     = fromIntegral . get fpPerm . get fsPermission
-        getBlockRepl = fromMaybe 0 . get fsBlockReplication
-
-        hdfs2utc ms  = posixSecondsToUTCTime (fromIntegral ms / 1000)
-        getModTime   = hdfs2utc . get fsModificationTime
+    let hdfs2utc ms  = posixSecondsToUTCTime (fromIntegral ms / 1000)
+        getModTime   = hdfs2utc . fsModificationTime
 
         col a f = vcat a (map (text . f) (V.toList ls))
 
     liftIO $ do
         putStrLn $ "Found " <> show (V.length ls) <> " items"
 
-        printBox $ col left  (\x -> formatMode (get fsFileType x) (getPerms x))
-               <+> col right (formatBlockRepl . getBlockRepl)
-               <+> col left  (T.unpack . get fsOwner)
-               <+> col left  (T.unpack . get fsGroup)
-               <+> col right (formatSize . get fsLength)
+        printBox $ col left  (\x -> formatMode (fsFileType x) (fsPermission x))
+               <+> col right (formatBlockReplication . fsBlockReplication)
+               <+> col left  (T.unpack . fsOwner)
+               <+> col left  (T.unpack . fsGroup)
+               <+> col right (formatSize . fsLength)
                <+> col right (formatUTC . getModTime)
-               <+> col left  (T.unpack . T.decodeUtf8 . get fsPath)
+               <+> col left  (T.unpack . T.decodeUtf8 . fsPath)
 
 ------------------------------------------------------------------------
-
-get :: HasField a => (t -> a) -> t -> FieldType a
-get f x = getField (f x)
-
-------------------------------------------------------------------------
-
-type Perms = Word16
 
 formatSize :: Word64 -> String
 formatSize b | b <= 0            = "0"
@@ -320,22 +308,22 @@ formatSize b | b <= 0            = "0"
              | b < 1000000000000 = show (b `div` 1000000000) <> "G"
              | otherwise         = show (b `div` 1000000000000) <> "T"
 
-formatBlockRepl :: Word32 -> String
-formatBlockRepl x | x == 0    = "-"
-                  | otherwise = show x
+formatBlockReplication :: Word16 -> String
+formatBlockReplication x | x == 0    = "-"
+                         | otherwise = show x
 
 formatUTC :: UTCTime -> String
 formatUTC = formatTime defaultTimeLocale "%Y-%m-%d %H:%M"
 
-formatMode :: FileType -> Perms -> String
-formatMode File    = ("-" <>) . formatPerms
-formatMode Dir     = ("d" <>) . formatPerms
-formatMode SymLink = ("l" <>) . formatPerms
+formatMode :: FileType -> Permission -> String
+formatMode File    = ("-" <>) . formatPermission
+formatMode Dir     = ("d" <>) . formatPermission
+formatMode SymLink = ("l" <>) . formatPermission
 
-formatPerms :: Perms -> String
-formatPerms perms = format (perms `shiftR` 6)
-                 <> format (perms `shiftR` 3)
-                 <> format perms
+formatPermission :: Permission -> String
+formatPermission perms = format (perms `shiftR` 6)
+                      <> format (perms `shiftR` 3)
+                      <> format perms
   where
     format p = conv 0x4 "r" p
             <> conv 0x2 "w" p
@@ -377,7 +365,7 @@ trimEnd b bs | B.null bs      = B.empty
 
 getListingOrFail :: HdfsPath -> Hdfs (V.Vector FileStatus)
 getListingOrFail path = do
-    mls <- getListing False path
+    mls <- getListing path
     case mls of
       Nothing -> throwM $ RemoteError ("File/directory does not exist: " <> T.decodeUtf8 path) T.empty
       Just ls -> return ls
