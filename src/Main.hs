@@ -157,6 +157,7 @@ allSubCommands :: [SubCommand]
 allSubCommands =
     [ subChDir
     , subDiskUsage
+    , subFind
     , subList
     , subMkDir
     , subPwd
@@ -188,6 +189,18 @@ subDiskUsage = SubCommand "du" "Show the amount of space used by file or directo
   where
     go = du <$> optional (argument bstr (completePath <> help "the file/directory to check the usage of"))
     du path = SubHdfs $ printDiskUsage =<< getAbsolute (fromMaybe "" path)
+
+subFind :: SubCommand
+subFind = SubCommand "find" "Recursively search a directory tree" go
+  where
+    go = find <$> (argument bstr (completeDir <> help "the path to recursively search"))
+              <*> (optional (option bstr (long "name" <> metavar "FILENAME"
+                                                      <> help "the file name to match exactly")))
+    find path mexpr = SubHdfs $ do
+        absPath <- getAbsolute path
+        printFindResults absPath $ maybe (const True) feq mexpr
+
+    feq expr FileStatus{..} = expr == fsPath
 
 subList :: SubCommand
 subList = SubCommand "ls" "List the contents of a directory" go
@@ -301,6 +314,19 @@ printListing path = do
                <+> col right (formatSize . fsLength)
                <+> col right (formatUTC . getModTime)
                <+> col left  (T.unpack . T.decodeUtf8 . fsPath)
+
+printFindResults :: HdfsPath -> (FileStatus -> Bool) -> Hdfs ()
+printFindResults path cond = handle (liftIO . printError) $ do
+    ls <- getListingOrFail path
+    V.mapM_ printMatch ls
+  where
+    printMatch :: FileStatus -> Hdfs ()
+    printMatch fs@FileStatus{..} = do
+        let path' = displayPath path fs
+        when (cond fs) (liftIO $ B.putStrLn path')
+        case fsFileType of
+          Dir -> printFindResults path' cond
+          _   -> return ()
 
 ------------------------------------------------------------------------
 
