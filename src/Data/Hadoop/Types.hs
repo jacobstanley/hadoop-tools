@@ -47,6 +47,20 @@ instance Exception RemoteError
 
 ------------------------------------------------------------------------
 
+data DecodeError = DecodeError !Text
+    deriving (Show, Eq, Data, Typeable)
+
+instance Exception DecodeError
+
+------------------------------------------------------------------------
+
+data ConnectionClosed = ConnectionClosed
+    deriving (Show, Eq, Data, Typeable)
+
+instance Exception ConnectionClosed
+
+------------------------------------------------------------------------
+
 type User       = Text
 type Group      = Text
 type Permission = Word16

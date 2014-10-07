@@ -11,16 +11,20 @@ module Network.Hadoop.Rpc
     , RawResponse
 
     , initConnectionV7
+    , invokeAsync
     , invoke
     ) where
 
 import           Control.Applicative ((<$>), (<*>))
-import           Control.Exception (throwIO)
-import           Control.Monad.IO.Class (liftIO)
-
+import           Control.Concurrent (ThreadId, forkIO, newEmptyMVar, putMVar, takeMVar)
+import           Control.Concurrent.STM
+import           Control.Exception (SomeException(..), throwIO, handle)
+import           Control.Monad (forever, when)
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as B
-import           Data.IORef
+import qualified Data.HashMap.Strict as H
+import           Data.Hashable (Hashable)
+import           Data.Maybe (fromMaybe, isNothing)
 import           Data.Monoid (mempty)
 import           Data.Text (Text)
 import qualified Data.Text as T
@@ -39,10 +43,10 @@ import           Network.Socket (Socket)
 ------------------------------------------------------------------------
 
 data Connection = Connection
-    { cnVersion  :: !Int
-    , cnConfig   :: !HadoopConfig
-    , cnProtocol :: !Protocol
-    , invokeRaw  :: !(Method -> RawRequest -> IO RawResponse)
+    { cnVersion    :: !Int
+    , cnConfig     :: !HadoopConfig
+    , cnProtocol   :: !Protocol
+    , invokeRaw    :: !(Method -> RawRequest -> (RawResponse -> IO ()) -> IO ())
     }
 
 data Protocol = Protocol
@@ -52,17 +56,28 @@ data Protocol = Protocol
 
 type Method      = Text
 type RawRequest  = ByteString
-type RawResponse = ByteString
+type RawResponse = Either SomeException ByteString
+
+type CallId = Int
 
 ------------------------------------------------------------------------
 
 -- hadoop-2.1.0-beta is on version 9
 -- see https://issues.apache.org/jira/browse/HADOOP-8990 for differences
 
+data ConnectionState = ConnectionState
+    { csStream        :: !S.Stream
+    , csCallId        :: !(TVar CallId)
+    , csRecvCallbacks :: !(TVar (H.HashMap CallId (RawResponse -> IO ())))
+    , csSendQueue     :: !(TQueue (Method, RawRequest, RawResponse -> IO ()))
+    , csFatalError    :: !(TVar (Maybe SomeException))
+    }
+
 initConnectionV7 :: HadoopConfig -> Protocol -> Socket -> IO Connection
 initConnectionV7 config@HadoopConfig{..} protocol sock = do
-    stream <- S.mkSocketStream sock
-    S.runPut stream $ do
+    csStream <- S.mkSocketStream sock
+
+    S.runPut csStream $ do
         putByteString "hrpc"
         putWord8 7  -- version
         putWord8 80 -- auth method (80 = simple, 81 = kerberos/gssapi, 82 = token/digest-md5)
@@ -72,25 +87,72 @@ initConnectionV7 config@HadoopConfig{..} protocol sock = do
         putWord32be (fromIntegral (B.length bs))
         putByteString bs
 
-    ref <- newIORef 0
-    return (Connection 7 config protocol (sendAndWait stream ref))
+    csCallId        <- newTVarIO 0
+    csRecvCallbacks <- newTVarIO H.empty
+    csSendQueue     <- newTQueueIO
+    csFatalError    <- newTVarIO Nothing
+
+    let cs = ConnectionState{..}
+
+    _ <- forkSend cs
+    _ <- forkRecv cs
+
+    return (Connection 7 config protocol (enqueue cs))
   where
-    sendAndWait :: S.Stream -> IORef Int -> Method -> ByteString -> IO ByteString
-    sendAndWait stream ref method requestBytes = do
-        callId <- atomicModifyIORef' ref (\x -> (succ x, x))
+    enqueue :: ConnectionState
+            -> Method
+            -> RawRequest
+            -> (RawResponse -> IO ())
+            -> IO ()
+    enqueue ConnectionState{..} method bs k = do
+        merr <- atomically $ do
+            merr <- readTVar csFatalError
+            when (isNothing merr) $ writeTQueue csSendQueue (method, bs, k)
+            return merr
+        case merr of
+            Just err -> throwIO err
+            Nothing  -> return ()
 
-        S.runPut stream $ do
-            let bs = runPut $ encodeLengthPrefixedMessage (requestHeader callId)
-                           >> encodeLengthPrefixedMessage (request method requestBytes)
+    forkSend :: ConnectionState -> IO ThreadId
+    forkSend cs@ConnectionState{..} = forkIO $ handle (onSocketError cs) $ forever $ do
+        bs <- atomically $ do
+            (method, requestBytes, k) <- readTQueue csSendQueue
 
+            callId <- readTVar csCallId
+            modifyTVar' csCallId succ
+            modifyTVar' csRecvCallbacks (H.insert callId k)
+
+            return $ runPut $ encodeLengthPrefixedMessage (requestHeaderProto callId)
+                           >> encodeLengthPrefixedMessage (requestProto method requestBytes)
+
+        S.runPut csStream $ do
             putWord32be (fromIntegral (B.length bs))
             putByteString bs
 
-        responseHdr <- S.maybeGet stream decodeLengthPrefixedMessage
-        case getField . rspStatus <$> responseHdr of
-            Just Success -> S.runGet stream getResponse
-            Just _       -> S.runGet stream getError >>= liftIO . throwIO
-            Nothing      -> throwClosed
+    forkRecv :: ConnectionState -> IO ThreadId
+    forkRecv cs@ConnectionState{..} = forkIO $ handle (onSocketError cs) $ forever $ do
+        hdr <- S.maybeGet csStream decodeLengthPrefixedMessage
+        case hdr of
+          Nothing     -> throwIO ConnectionClosed
+          Just rspHdr -> do
+            onResponse <- fromMaybe (return $ return ())
+                      <$> lookupDelete csRecvCallbacks (fromIntegral $ getField $ rspCallId rspHdr)
+            case getField (rspStatus rspHdr) of
+              Success -> S.runGet csStream getResponse >>= onResponse . Right
+              _       -> S.runGet csStream getError    >>= onResponse . Left . SomeException
+
+    onSocketError :: ConnectionState -> SomeException -> IO ()
+    onSocketError ConnectionState{..} ex = do
+        ks <- atomically $ do
+            writeTVar csFatalError (Just ex)
+            sks <- map (\(_,_,k) -> k) <$> unfoldM (tryReadTQueue csSendQueue)
+            rks <- H.elems <$> readTVar csRecvCallbacks
+            return (sks ++ rks)
+
+        mapM_ (\k -> handle ignore $ k $ Left ex) ks
+
+    ignore :: SomeException -> IO ()
+    ignore _ = return ()
 
     context = IpcConnectionContext
         { ctxProtocol = putField (Just (prName protocol))
@@ -100,20 +162,33 @@ initConnectionV7 config@HadoopConfig{..} protocol sock = do
             })
         }
 
-    requestHeader callId = RpcRequestHeader
+    requestHeaderProto callId = RpcRequestHeader
         { reqKind       = putField (Just ProtocolBuffer)
         , reqOp         = putField (Just FinalPacket)
         , reqCallId     = putField (fromIntegral callId)
         }
 
-    request method bytes = RpcRequest
+    requestProto method bytes = RpcRequest
         { reqMethodName      = putField method
         , reqBytes           = putField (Just bytes)
         , reqProtocolName    = putField (prName protocol)
         , reqProtocolVersion = putField (fromIntegral (prVersion protocol))
         }
 
-    throwClosed = throwIO (RemoteError "ConnectionClosed" "The socket connection was closed")
+unfoldM :: Monad m => m (Maybe a) -> m [a]
+unfoldM f = go []
+  where
+    go xs = do
+      m <- f
+      case m of
+        Nothing -> return xs
+        Just x  -> go (xs ++ [x])
+
+lookupDelete :: (Eq k, Hashable k) => TVar (H.HashMap k v) -> k -> IO (Maybe v)
+lookupDelete var k = atomically $ do
+    hm <- readTVar var
+    writeTVar var (H.delete k hm)
+    return (H.lookup k hm)
 
 ------------------------------------------------------------------------
 
@@ -132,10 +207,27 @@ getError = RemoteError <$> getText <*> getText
 ------------------------------------------------------------------------
 
 invoke :: (Decode b, Encode a) => Connection -> Text -> a -> IO b
-invoke Connection{..} method arg = decodeBytes =<< invokeRaw method (encodeBytes arg)
+invoke connection method arg = do
+    mv <- newEmptyMVar
+    invokeAsync connection method arg (putMVar mv)
+    e <- takeMVar mv
+    case e of
+      Left ex -> throwIO ex
+      Right x -> return x
+
+invokeAsync :: (Decode b, Encode a) => Connection -> Text -> a -> (Either SomeException b -> IO ()) -> IO ()
+invokeAsync Connection{..} method arg k = invokeRaw method (encodeBytes arg) k'
   where
-    encodeBytes = runPut . encodeMessage
-    decodeBytes bs = case runGetState decodeMessage bs 0 of
-        Left err      -> throwIO (RemoteError "DecodeError" (T.pack err))
-        Right (x, "") -> return x
-        Right (_, _)  -> throwIO (RemoteError "DecodeError" "decoded response but did not consume enough bytes")
+    k' (Left err) = k (Left err)
+    k' (Right bs) = k (decodeBytes bs)
+
+encodeBytes :: Encode a => a -> ByteString
+encodeBytes = runPut . encodeMessage
+
+decodeBytes :: Decode a => ByteString -> Either SomeException a
+decodeBytes bs = case runGetState decodeMessage bs 0 of
+    Left err      -> decodeError (T.pack err)
+    Right (x, "") -> Right x
+    Right (_, _)  -> decodeError "decoded response but did not consume enough bytes"
+  where
+    decodeError = Left . SomeException . DecodeError

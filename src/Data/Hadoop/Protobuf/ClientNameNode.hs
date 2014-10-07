@@ -8,7 +8,6 @@ import Data.ByteString (ByteString)
 import Data.ProtocolBuffers
 import Data.Text (Text)
 import Data.Int (Int64)
-import Data.Word (Word64)
 import GHC.Generics (Generic)
 
 import Data.Hadoop.Protobuf.Hdfs

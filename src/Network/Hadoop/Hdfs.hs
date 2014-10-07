@@ -16,6 +16,7 @@ module Network.Hadoop.Hdfs
 
     , getListing
     , getListing'
+    , getListingRecursive
     , getFileInfo
     , getContentSummary
     , mkdirs
@@ -25,13 +26,17 @@ module Network.Hadoop.Hdfs
     ) where
 
 import           Control.Applicative (Applicative(..), (<$>))
-import           Control.Exception (throw)
-import           Control.Monad (ap)
+import           Control.Concurrent.STM
+import           Control.Exception (SomeException(..), throw)
+import           Control.Monad (ap, when)
 import           Control.Monad.Catch (MonadMask(..), MonadThrow(..), MonadCatch(..))
 import           Control.Monad.IO.Class (MonadIO(..))
 import           Data.ByteString (ByteString)
+import qualified Data.ByteString.Char8 as B
 import           Data.Maybe (fromMaybe)
+import           Data.Monoid ((<>))
 import           Data.Text (Text)
+import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Vector as V
 import           Data.Word (Word32)
@@ -42,6 +47,7 @@ import           Data.ProtocolBuffers
 import           Data.ProtocolBuffers.Orphans ()
 
 import           Data.Hadoop.Configuration
+import           Data.Hadoop.HdfsPath
 import           Data.Hadoop.Types
 import           Network.Hadoop.Rpc
 import qualified Network.Hadoop.Socket as S
@@ -58,8 +64,8 @@ instance Applicative Hdfs where
     (<*>) = ap
 
 instance Monad Hdfs where
-    return x = Hdfs $ \_ -> return x
-    m >>= k  = Hdfs $ \c -> unHdfs m c >>= \x -> unHdfs (k x) c
+    return  = pure
+    m >>= k = Hdfs $ \c -> unHdfs m c >>= \x -> unHdfs (k x) c
 
 instance MonadIO Hdfs where
     liftIO io = Hdfs $ const io
@@ -112,6 +118,74 @@ hdfsInvoke method arg = Hdfs $ \c -> invoke c method arg
 
 ------------------------------------------------------------------------
 
+getListingRecursive :: HdfsPath
+                    -> Hdfs (TBQueue (Maybe (HdfsPath, Either SomeException (V.Vector FileStatus))))
+getListingRecursive initialPath = do
+    conn <- getConnection
+    queue <- liftIO (newTBQueueIO 10)
+    outstanding <- liftIO (newTVarIO 0)
+    liftIO (getListingRecursive' conn outstanding queue initialPath)
+    return queue
+
+getListingRecursive' :: Connection
+                     -> TVar Int
+                     -> TBQueue (Maybe (HdfsPath, Either SomeException (V.Vector FileStatus)))
+                     -> HdfsPath
+                     -> IO ()
+getListingRecursive' conn outstanding queue rootPath = do
+    getInitial rootPath
+  where
+    getInitial path = getPartial path B.empty
+
+    getPartial path startAfter = do
+        atomically $ modifyTVar' outstanding succ
+        getPartialAsync conn path startAfter (onPartial path)
+
+    onPartial path (Left err) = enqueueResult path (Left err)
+    onPartial path (Right PartialListing{..}) = do
+        when (lsRemaining /= 0) $
+            getPartial path (lastFileName lsFiles)
+
+        V.mapM_ getInitial $ V.map (\x -> path </> x) $ dirs lsFiles
+
+        enqueueResult path (Right lsFiles)
+
+    enqueueResult path result = atomically $ do
+        writeTBQueue queue $ Just (path, result)
+        modifyTVar' outstanding pred
+        n <- readTVar outstanding
+        when (n == 0) (writeTBQueue queue Nothing)
+
+    dirs :: V.Vector FileStatus -> V.Vector HdfsPath
+    dirs = V.map fsPath . V.filter ((Dir ==) . fsFileType)
+
+getPartialAsync :: Connection
+                -> HdfsPath
+                -> HdfsPath
+                -> (Either SomeException PartialListing -> IO ())
+                -> IO ()
+getPartialAsync c path startAfter k = invokeAsync c "getListing" request k'
+  where
+    k' :: Either SomeException P.GetListingResponse -> IO ()
+    k' (Left err)    = k (Left err)
+    k' (Right proto) = k (fromProto proto)
+
+    fromProto :: P.GetListingResponse -> Either SomeException PartialListing
+    fromProto dl = case getField (P.lsDirList dl) of
+        Nothing -> Left notExist
+        Just x  -> Right (fromProtoDirectoryListing x)
+
+    notExist :: SomeException
+    notExist = SomeException $ RemoteError ("Directory does not exist: " <> T.decodeUtf8 path) T.empty
+
+    request = P.GetListingRequest
+        { P.lsSrc          = putField (T.decodeUtf8 path)
+        , P.lsStartAfter   = putField startAfter
+        , P.lsNeedLocation = putField False
+        }
+
+------------------------------------------------------------------------
+
 getListing :: HdfsPath -> Hdfs (Maybe (V.Vector FileStatus))
 getListing path = do
     mDirList <- getPartialListing path ""
@@ -120,10 +194,6 @@ getListing path = do
       Just (PartialListing 0 fs) -> return (Just fs)
       Just (PartialListing _ fs) -> Just <$> loop [fs] (lastFileName fs)
   where
-    lastFileName :: V.Vector FileStatus -> ByteString
-    lastFileName v | V.null v  = ""
-                   | otherwise = fsPath (V.last v)
-
     loop :: [V.Vector FileStatus] -> ByteString -> Hdfs (V.Vector FileStatus)
     loop ps startAfter = do
         PartialListing{..} <- fromMaybe (PartialListing 0 V.empty)
@@ -137,6 +207,10 @@ getListing path = do
 
 getListing' :: HdfsPath -> Hdfs (V.Vector FileStatus)
 getListing' path = fromMaybe V.empty <$> getListing path
+
+lastFileName :: V.Vector FileStatus -> ByteString
+lastFileName v | V.null v  = ""
+               | otherwise = fsPath (V.last v)
 
 ------------------------------------------------------------------------
 
