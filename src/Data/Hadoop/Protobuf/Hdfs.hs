@@ -67,37 +67,37 @@ instance Decode FileStatus
 ------------------------------------------------------------------------
 
 -- | The type of a file (either directory, file or symbolic link)
-data FileType = Dir | File | SymLink
+data FileType = IS_DIR | IS_FILE | IS_SYMLINK
     deriving (Generic, Show, Eq)
 
 instance Enum FileType where
     toEnum n = case n of
-      1 -> Dir
-      2 -> File
-      3 -> SymLink
+      1 -> IS_DIR
+      2 -> IS_FILE
+      3 -> IS_SYMLINK
       _ -> error $ "FileType.toEnum: invalid enum value <" ++ show n ++ ">"
 
     fromEnum e = case e of
-      Dir     -> 1
-      File    -> 2
-      SymLink -> 3
+      IS_DIR     -> 1
+      IS_FILE    -> 2
+      IS_SYMLINK -> 3
 
 ------------------------------------------------------------------------
 
-data ChecksumType = ChecksumNull | ChecksumCRC32 | ChecksumCRC32C
+data ChecksumType = CHECKSUM_NULL | CHECKSUM_CRC32 | CHECKSUM_CRC32C
     deriving (Generic, Show, Eq)
 
 instance Enum ChecksumType where
     toEnum n = case n of
-      0 -> ChecksumNull
-      1 -> ChecksumCRC32
-      2 -> ChecksumCRC32C
+      0 -> CHECKSUM_NULL
+      1 -> CHECKSUM_CRC32
+      2 -> CHECKSUM_CRC32C
       _ -> error $ "ChecksumType.toEnum: invalid enum value <" ++ show n ++ ">"
 
     fromEnum e = case e of
-      ChecksumNull   -> 0
-      ChecksumCRC32  -> 1
-      ChecksumCRC32C -> 2
+      CHECKSUM_NULL   -> 0
+      CHECKSUM_CRC32  -> 1
+      CHECKSUM_CRC32C -> 2
 
 instance Encode ChecksumType
 instance Decode ChecksumType
@@ -168,7 +168,7 @@ data DataNodeInfo = DataNodeInfo
     , dnLastUpdate    :: Optional 6 (Value Word64) -- ^ default = 0
     , dnXceiverCount  :: Optional 7 (Value Word32) -- ^ default = 0
     , dnLocation      :: Optional 8 (Value Text)
-    , dnAdminState    :: Optional 9 (Enumeration AdminState) -- ^ default = Normal
+    , dnAdminState    :: Optional 9 (Enumeration AdminState) -- ^ default = NORMAL
     } deriving (Generic, Show)
 
 instance Encode DataNodeInfo
@@ -176,8 +176,20 @@ instance Decode DataNodeInfo
 
 ------------------------------------------------------------------------
 
-data AdminState = Normal | DecommissionInProgress | Decommission
-    deriving (Generic, Show, Eq, Enum)
+data AdminState = NORMAL | DECOMMISSION_INPROGRESS | DECOMMISSIONED
+    deriving (Generic, Show, Eq)
+
+instance Enum AdminState where
+    toEnum n = case n of
+      0 -> NORMAL
+      1 -> DECOMMISSION_INPROGRESS
+      2 -> DECOMMISSIONED
+      _ -> error $ "AdminState.toEnum: invalid enum value <" ++ show n ++ ">"
+
+    fromEnum e = case e of
+      NORMAL                  -> 0
+      DECOMMISSION_INPROGRESS -> 1
+      DECOMMISSIONED          -> 2
 
 ------------------------------------------------------------------------
 

@@ -2,19 +2,15 @@
 
 module Main (main) where
 
-import           Data.ProtocolBuffers (getField)
-import qualified Data.Vector as V
-
-import           Data.Hadoop.Protobuf.Hdfs
-import           Data.Hadoop.Types
-import           Network.Hadoop.Hdfs
+import Data.Hadoop.Types
+import Network.Hadoop.Hdfs
 
 ------------------------------------------------------------------------
 
 main :: IO ()
 main = do
     files <- runHdfs' config (getListing' "/")
-    print $ V.map (getField . fsPath) files
+    print files
 
 config :: HadoopConfig
 config = HadoopConfig {
