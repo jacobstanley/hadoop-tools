@@ -160,7 +160,7 @@ allSubCommands =
     [ subCat
     , subChDir
     , subDiskUsage
-    , subFind
+    -- , subFind
     , subGet
     , subList
     , subMkDir
