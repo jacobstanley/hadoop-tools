@@ -35,7 +35,9 @@ executable hh
     , old-locale           >= 1.0
     , optparse-applicative >= 0.10
     , protobuf             >= 0.2.0.4
+    , regex-pcre-builtin   >= 0.94
     , split                >= 0.2
+    , stm                  >= 2.4
     , text                 >= 1.1
     , time                 >= 1.4
     , transformers         >= 0.4

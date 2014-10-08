@@ -3,7 +3,8 @@
 
 module Main (main) where
 
-import           Control.Exception (SomeException, bracket)
+import           Control.Concurrent.STM
+import           Control.Exception (SomeException, throwIO, bracket, fromException)
 import           Control.Monad
 import           Control.Monad.Catch (handle, throwM)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
@@ -20,25 +21,27 @@ import qualified Data.Text.IO as T
 import           Data.Time
 import           Data.Time.Clock.POSIX
 import qualified Data.Vector as V
-import           Data.Word (Word16, Word32, Word64)
+import           Data.Version (showVersion)
+import           Data.Word (Word16, Word64)
 
 import qualified Data.Configurator as C
 import           Data.Configurator.Types (Worth(..))
+import           Options.Applicative hiding (Success)
 import           System.Environment (getEnv)
-import           System.FilePath.Posix
+import qualified System.FilePath as FilePath
+import qualified System.FilePath.Posix as Posix
 import           System.IO
 import           System.IO.Unsafe (unsafePerformIO)
 import           System.Locale (defaultTimeLocale)
 import           Text.PrettyPrint.Boxes hiding ((<>), (//))
 
 import           Data.Hadoop.Configuration (getHadoopConfig)
+import           Data.Hadoop.HdfsPath
 import           Data.Hadoop.Types
 import           Network.Hadoop.Hdfs hiding (runHdfs)
 import           Network.Hadoop.Read
 
-import           Options.Applicative hiding (Success)
-
-import           Data.Version (showVersion)
+import qualified Glob as Glob
 import           Paths_hadoop_tools (version)
 
 ------------------------------------------------------------------------
@@ -77,7 +80,7 @@ getConfig = do
 configPath :: FilePath
 configPath = unsafePerformIO $ do
     home <- getEnv "HOME"
-    return (home </> ".hh")
+    return (home `FilePath.combine` ".hh")
 {-# NOINLINE configPath #-}
 
 getHdfsUser :: IO (Maybe User)
@@ -103,11 +106,11 @@ getSocksProxy = do
 workingDirConfigPath :: FilePath
 workingDirConfigPath = unsafePerformIO $ do
     home <- getEnv "HOME"
-    return (home </> ".hhwd")
+    return (home `FilePath.combine` ".hhwd")
 {-# NOINLINE workingDirConfigPath #-}
 
 getDefaultWorkingDir :: MonadIO m => m HdfsPath
-getDefaultWorkingDir = liftIO $ (("/user" //) . T.encodeUtf8 . hcUser) <$> getConfig
+getDefaultWorkingDir = liftIO $ (("/user" </>) . T.encodeUtf8 . hcUser) <$> getConfig
 
 getWorkingDir :: MonadIO m => m HdfsPath
 getWorkingDir = liftIO $ handle onError
@@ -126,7 +129,7 @@ getAbsolute path = liftIO (normalizePath <$> getPath)
   where
     getPath = if "/" `B.isPrefixOf` path
               then return path
-              else getWorkingDir >>= \pwd -> return (pwd // path)
+              else getWorkingDir >>= \pwd -> return (pwd </> path)
 
 normalizePath :: HdfsPath -> HdfsPath
 normalizePath = B.intercalate "/" . dropAbsParentDir . B.split '/'
@@ -164,7 +167,7 @@ allSubCommands =
     , subChDir
     , subChMod
     , subDiskUsage
-    -- , subFind
+    , subFind
     , subGet
     , subList
     , subMkDir
@@ -239,14 +242,18 @@ subDiskUsage = SubCommand "du" "Show the amount of space used by file or directo
 subFind :: SubCommand
 subFind = SubCommand "find" "Recursively search a directory tree" go
   where
-    go = find <$> (argument bstr (completeDir <> help "the path to recursively search"))
+    go = find <$> (optional (argument bstr (completeDir <> help "the path to recursively search")))
               <*> (optional (option bstr (long "name" <> metavar "FILENAME"
-                                                      <> help "the file name to match exactly")))
-    find path mexpr = SubHdfs $ do
-        absPath <- getAbsolute path
-        printFindResults absPath $ maybe (const True) feq mexpr
+                                                      <> help "the file name to match")))
+    find mpath mexpr = SubHdfs $ do
+        matcher <- liftIO (mkMatcher mexpr)
+        printFindResults (fromMaybe "" mpath) matcher
 
-    feq expr FileStatus{..} = expr == fsPath
+    mkMatcher :: Maybe ByteString -> IO (FileStatus -> Bool)
+    mkMatcher Nothing     = return (const True)
+    mkMatcher (Just expr) = do
+        glob <- Glob.compile expr
+        return (Glob.matches glob . fsPath)
 
 subGet :: SubCommand
 subGet = SubCommand "get" "Get a file" go
@@ -254,7 +261,7 @@ subGet = SubCommand "get" "Get a file" go
     go = get <$> argument bstr (completePath <> help "source file")
              <*> optional (argument str (completePath <> help "destination file"))
     get src mdst = SubHdfs $ do
-      let dst = fromMaybe (takeFileName $ B.unpack src) mdst
+      let dst = fromMaybe (Posix.takeFileName $ B.unpack src) mdst
       absSrc <- getAbsolute src
       mReadHandle <- openRead absSrc
       let doRead readHandle = liftIO $ bracket
@@ -335,7 +342,7 @@ takeParent bs = case B.elemIndexEnd '/' bs of
     Just ix -> B.take ix bs
 
 displayPath :: HdfsPath -> FileStatus -> HdfsPath
-displayPath parent file = parent // fsPath file <> suffix
+displayPath parent file = parent </> fsPath file <> suffix
   where
     suffix = case fsFileType file of
         Dir -> "/"
@@ -379,20 +386,46 @@ printListing path = do
                <+> col left  (ifEmpty basePath . T.unpack . T.decodeUtf8 . fsPath)
   where
     ifEmpty def x = if x=="" then def else x
-    basePath = takeFileName (B.unpack path)
+    basePath = Posix.takeFileName (B.unpack path)
 
 printFindResults :: HdfsPath -> (FileStatus -> Bool) -> Hdfs ()
-printFindResults path cond = handle (liftIO . printError) $ do
-    ls <- getListingOrFail path
-    V.mapM_ printMatch ls
+printFindResults path cond = do
+    absPath <- getAbsolute path
+    q <- getListingRecursive absPath
+    liftIO $ loop q $ printMatch (replaceFullPathWithInputPath absPath path)
   where
-    printMatch :: FileStatus -> Hdfs ()
-    printMatch fs@FileStatus{..} = do
-        let path' = displayPath path fs
-        when (cond fs) (liftIO $ B.putStrLn path')
-        case fsFileType of
-          Dir -> printFindResults path' cond
-          _   -> return ()
+    loop :: TBQueue (Maybe (HdfsPath, Either SomeException (V.Vector FileStatus)))
+         -> (HdfsPath -> FileStatus -> IO ())
+         -> IO ()
+    loop q io = do
+        mx <- atomically (readTBQueue q)
+        case mx of
+          Nothing -> return ()
+          Just (parent, x) -> do
+            case x of
+              (Left err) -> printOrThrow err
+              (Right ls) -> V.mapM_ (io parent) ls
+            loop q io
+
+    printOrThrow :: SomeException -> IO ()
+    printOrThrow ex = case fromException ex of
+        Nothing  -> throwIO ex
+        Just err -> printError err
+
+    printMatch :: (HdfsPath -> HdfsPath) -> HdfsPath -> FileStatus -> IO ()
+    printMatch fixup parent fs@FileStatus{..} = do
+        let path' = fixup (displayPath parent fs)
+        when (cond fs) (B.putStrLn path')
+
+replaceFullPathWithInputPath :: HdfsPath -> HdfsPath -> HdfsPath -> HdfsPath
+replaceFullPathWithInputPath fullPath inputPath path
+    | fullPath' `B.isPrefixOf` path = inputPath </> B.drop (B.length fullPath') path
+    | otherwise                     = path
+  where
+    fullPath' = addDirSlash fullPath
+
+    addDirSlash dir | "/" `B.isSuffixOf` dir = dir
+                    | otherwise              = dir <> "/"
 
 ------------------------------------------------------------------------
 
@@ -443,17 +476,6 @@ printError (RemoteError subject body)
 
 isAccessDenied :: RemoteError -> Bool
 isAccessDenied (RemoteError s _) = s == "org.apache.hadoop.security.AccessControlException"
-
-------------------------------------------------------------------------
-
-infixr 5 //
-
-(//) :: HdfsPath -> HdfsPath -> HdfsPath
-(//) xs ys | B.null xs        = ys
-           | B.null ys        = xs
-           | B.head ys == '/' = ys
-           | B.last xs == '/' = xs <> ys
-           | otherwise        = xs <> "/" <> ys
 
 ------------------------------------------------------------------------
 
