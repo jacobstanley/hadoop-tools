@@ -3,7 +3,7 @@
 
 module Main (main) where
 
-import           Control.Exception (SomeException)
+import           Control.Exception (SomeException, bracket)
 import           Control.Monad
 import           Control.Monad.Catch (handle, throwM)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
@@ -24,6 +24,7 @@ import qualified Data.Configurator as C
 import           Data.Configurator.Types (Worth(..))
 import           System.Environment (getEnv)
 import           System.FilePath.Posix
+import           System.IO
 import           System.IO.Unsafe (unsafePerformIO)
 import           System.Locale (defaultTimeLocale)
 import           Text.PrettyPrint.Boxes hiding ((<>), (//))
@@ -160,6 +161,7 @@ allSubCommands =
     , subChDir
     , subDiskUsage
     , subFind
+    , subGet
     , subList
     , subMkDir
     , subPwd
@@ -209,6 +211,21 @@ subFind = SubCommand "find" "Recursively search a directory tree" go
         printFindResults absPath $ maybe (const True) feq mexpr
 
     feq expr FileStatus{..} = expr == fsPath
+
+subGet :: SubCommand
+subGet = SubCommand "get" "Get a file" go
+  where
+    go = get <$> argument bstr (completePath <> help "source file")
+             <*> optional (argument bstr (completePath <> help "destination file"))
+    get src mdst = SubHdfs $ do
+      let dst = fromMaybe src mdst
+      absSrc <- getAbsolute src
+      mReadHandle <- openRead absSrc
+      let doRead readHandle = liftIO $ bracket
+              (openFile (B.unpack dst) WriteMode)
+              (hClose)
+              (\writeHandle -> hdfsMapM_ (B.hPut writeHandle) readHandle)
+      maybe (return ()) doRead mReadHandle
 
 subList :: SubCommand
 subList = SubCommand "ls" "List the contents of a directory" go
