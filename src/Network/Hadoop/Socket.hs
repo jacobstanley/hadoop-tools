@@ -10,7 +10,8 @@ module Network.Hadoop.Socket
     ) where
 
 import           Control.Applicative ((<$>))
-import           Control.Exception (bracket, bracketOnError)
+import           Control.Monad.Catch (MonadMask, bracket, bracketOnError)
+import           Control.Monad.IO.Class (MonadIO(..))
 import           Data.Hadoop.Types
 import qualified Data.Text as T
 import           Network (PortID(PortNumber))
@@ -19,15 +20,19 @@ import           Network.Socks5 (defaultSocksConf, socksConnectWith)
 
 ------------------------------------------------------------------------
 
-runTcp :: Maybe SocksProxy -> Endpoint -> (S.Socket -> IO a) -> IO a
+runTcp :: (MonadMask m, MonadIO m) => Maybe SocksProxy -> Endpoint -> (S.Socket -> m a) -> m a
 runTcp Nothing      = runTcp'
 runTcp (Just proxy) = runSocks proxy
 
-runTcp' :: Endpoint -> (S.Socket -> IO a) -> IO a
-runTcp' endpoint = bracket (fst <$> connectSocket endpoint) closeSocket
+runTcp' :: (MonadMask m, MonadIO m) => Endpoint -> (S.Socket -> m a) -> m a
+runTcp' endpoint = bracket
+    (liftIO $ fst <$> connectSocket endpoint)
+    (liftIO . closeSocket)
 
-runSocks :: SocksProxy -> Endpoint -> (S.Socket -> IO a) -> IO a
-runSocks proxy endpoint = bracket (socksConnectWith proxyConf host port) closeSocket
+runSocks :: (MonadMask m, MonadIO m) => SocksProxy -> Endpoint -> (S.Socket -> m a) -> m a
+runSocks proxy endpoint = bracket
+    (liftIO $ socksConnectWith proxyConf host port)
+    (liftIO . closeSocket)
   where
     proxyConf = defaultSocksConf (T.unpack $ epHost proxy)
                                  (fromIntegral $ epPort proxy)
