@@ -1,5 +1,5 @@
 name:          hadoop-tools
-version:       0.2
+version:       0.3
 synopsis:      Fast command line tools for working with Hadoop.
 description:   Fast command line tools for working with Hadoop.
 homepage:      http://github.com/jystic/hadoop-tools
