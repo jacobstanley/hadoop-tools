@@ -26,6 +26,7 @@ import           Data.Maybe (fromMaybe)
 import           Data.ProtocolBuffers
 import           Data.ProtocolBuffers.Orphans ()
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 import           Data.Word (Word32, Word64)
 
 import           Data.Serialize.Get
@@ -52,10 +53,10 @@ data HdfsReadHandle = HdfsReadHandle
 -- | Open an HDFS path for reading.
 -- This retrieves the block locations for an HDFS path, but does not
 -- yet initiate any data transfers.
-openRead :: FilePath -> Hdfs (Maybe HdfsReadHandle)
+openRead :: HdfsPath -> Hdfs (Maybe HdfsReadHandle)
 openRead path = do
     locs <- getField . locsLocations <$> hdfsInvoke "getBlockLocations" GetBlockLocationsRequest
-        { catSrc    = putField (T.pack path)
+        { catSrc    = putField (T.decodeUtf8 path)
         , catOffset = putField 0
         , catLength = putField maxBound
         }
@@ -66,7 +67,7 @@ openRead path = do
             return $ Just (HdfsReadHandle proxy ls)
 
 -- | Print the contents of a file on HDFS to stdout
-hdfsCat :: FilePath -> Hdfs ()
+hdfsCat :: HdfsPath -> Hdfs ()
 hdfsCat path = do
     h <- openRead path
     maybe (return ()) (hdfsMapM_ (liftIO . B.putStr)) h
