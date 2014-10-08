@@ -26,7 +26,7 @@ module Network.Hadoop.Hdfs
 import           Control.Applicative (Applicative(..), (<$>))
 import           Control.Exception (throw)
 import           Control.Monad (ap)
-import           Control.Monad.Catch (MonadThrow(..), MonadCatch(..))
+import           Control.Monad.Catch (MonadMask(..), MonadThrow(..), MonadCatch(..))
 import           Control.Monad.IO.Class (MonadIO(..))
 import           Data.ByteString (ByteString)
 import           Data.Maybe (fromMaybe)
@@ -67,6 +67,13 @@ instance MonadThrow Hdfs where
 
 instance MonadCatch Hdfs where
     catch m k = Hdfs $ \c -> unHdfs m c `catch` \e -> unHdfs (k e) c
+
+instance MonadMask Hdfs where
+    mask a = Hdfs $ \e -> mask $ \u -> unHdfs (a $ q u) e
+      where q u (Hdfs b) = Hdfs (u . b)
+    uninterruptibleMask a =
+      Hdfs $ \e -> uninterruptibleMask $ \u -> unHdfs (a $ q u) e
+        where q u (Hdfs b) = Hdfs (u . b)
 
 ------------------------------------------------------------------------
 
