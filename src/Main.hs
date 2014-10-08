@@ -31,6 +31,7 @@ import           Text.PrettyPrint.Boxes hiding ((<>), (//))
 import           Data.Hadoop.Configuration (getHadoopConfig)
 import           Data.Hadoop.Types
 import           Network.Hadoop.Hdfs hiding (runHdfs)
+import           Network.Hadoop.Read
 
 import           Options.Applicative hiding (Success)
 
@@ -155,7 +156,8 @@ options = subparser (foldMap sub allSubCommands)
 
 allSubCommands :: [SubCommand]
 allSubCommands =
-    [ subChDir
+    [ subCat
+    , subChDir
     , subDiskUsage
     , subFind
     , subList
@@ -174,6 +176,12 @@ completeDir  = completer (fileCompletion (== Dir)) <> metavar "DIRECTORY"
 
 bstr :: Monad m => String -> m ByteString
 bstr x = B.pack `liftM` str x
+
+subCat :: SubCommand
+subCat = SubCommand "cat" "Print the contents of a file to stdout" go
+  where
+    go = cat <$> many (argument bstr (completePath <> help "the file to cat"))
+    cat paths = SubHdfs $ mapM_ (hdfsCat <=< getAbsolute) paths
 
 subChDir :: SubCommand
 subChDir = SubCommand "cd" "Change working directory" go
