@@ -8,7 +8,7 @@ _hh()
         CMDLINE=(${CMDLINE[@]} --bash-completion-word $arg)
     done
 
-    COMPREPLY=( $(/path/to/hh "${CMDLINE[@]}") )
+    COMPREPLY=( $(hh "${CMDLINE[@]}") )
 }
 
 complete -o nospace -F _hh hh
