@@ -1,7 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
 
 module Network.Hadoop.Read
     ( HdfsReadHandle
@@ -15,6 +15,7 @@ module Network.Hadoop.Read
 import           Control.Applicative (Applicative(..), (<$>))
 import           Control.Exception (throwIO)
 import           Control.Monad (guard)
+import           Control.Monad.Catch (MonadMask)
 import           Control.Monad.IO.Class (MonadIO(..))
 import           Data.Attoparsec.Text (Parser, char, decimal, parseOnly)
 import           Data.Bits
@@ -68,10 +69,11 @@ openRead path = do
 hdfsCat :: FilePath -> Hdfs ()
 hdfsCat path = do
     h <- openRead path
-    liftIO $ maybe (return ()) (hdfsMapM_ B.putStr) h
+    maybe (return ()) (hdfsMapM_ (liftIO . B.putStr)) h
 
 -- | Map an action over the contents of a file on HDFS.
-hdfsMapM_ :: (ByteString -> IO ()) -> HdfsReadHandle -> IO ()
+hdfsMapM_ :: (MonadIO m, MonadMask m) =>
+    (ByteString -> m ()) -> HdfsReadHandle -> m ()
 hdfsMapM_ f (HdfsReadHandle proxy l) = do
         let len = getField . lbFileLength $ l
         mapM_ (showBlock proxy len) (getField . lbBlocks $ l)
@@ -88,12 +90,10 @@ hdfsMapM_ f (HdfsReadHandle proxy l) = do
         let endpoint = Endpoint host (fromIntegral port)
         catBlock proxy endpoint 0 len extended token
 
-    catBlock :: Maybe SocksProxy -> Endpoint -> Word64 -> Word64 -> ExtendedBlock -> Token -> IO ()
     catBlock proxy endpoint offset len0 extended token = do
         let len = fromMaybe len0 . getField . ebNumBytes $ extended
         S.runTcp proxy endpoint $ readBlocks offset len extended token
 
-    readBlocks :: Word64 -> Word64 -> ExtendedBlock -> Token -> S.Socket -> IO ()
     readBlocks offset len extended token sock = go 0 offset len
       where
         go nread0 offset0 rem0 = do
@@ -103,11 +103,11 @@ hdfsMapM_ f (HdfsReadHandle proxy l) = do
                 rem = rem0 - len
             if rem > 0 then go nread offset rem else return ()
 
-    readBlock :: Word64 -> Word64 -> ExtendedBlock -> Token -> S.Socket -> IO Word64
     readBlock offset rem extended token sock = do
-        stream <- Stream.mkSocketStream sock
-        Stream.runPut stream putReadRequest
-        b <- Stream.runGet stream decodeLengthPrefixedMessage
+        stream <- liftIO  $Stream.mkSocketStream sock
+        b <- liftIO $ do
+            Stream.runPut stream putReadRequest
+            Stream.runGet stream decodeLengthPrefixedMessage
         readPackets b rem stream
       where
 
@@ -135,7 +135,6 @@ hdfsMapM_ f (HdfsReadHandle proxy l) = do
         showBlockOpResponse :: BlockOpResponse -> String
         showBlockOpResponse = show
 
-    readPackets :: BlockOpResponse -> Word64 -> Stream -> IO Word64
     readPackets BlockOpResponse{..} len stream = go 0 len
       where
         go nread0 rem0 = do
@@ -148,20 +147,21 @@ hdfsMapM_ f (HdfsReadHandle proxy l) = do
         c = getField . rociChecksum <$> m
         b = fromIntegral . getField . csBytesPerChecksum <$> c
 
-    readPacket :: Maybe Word32 -> Word64 -> Stream -> IO Word64
     readPacket bytesPerChecksum remaining stream = do
-        len <- Stream.runGet stream getWord32be
-        sz <- Stream.runGet stream getWord16be
+        (dataLen, d) <- liftIO $ do
+            len <- Stream.runGet stream getWord32be
+            sz <- Stream.runGet stream getWord16be
 
-        bs <- Stream.runGet stream $ getByteString (fromIntegral sz)
-        ph <- decodeBytes bs
-        let numChunks = countChunks ph
-            dataLen = fromIntegral . getField . phDataLen $ ph
+            bs <- Stream.runGet stream $ getByteString (fromIntegral sz)
+            ph <- decodeBytes bs
+            let numChunks = countChunks ph
+                dataLen = fromIntegral . getField . phDataLen $ ph
 
-        _ <- Stream.runGet stream (getByteString (4*numChunks))
-        d <- Stream.runGet stream (getByteString dataLen)
+            _ <- Stream.runGet stream (getByteString (4*numChunks))
+            (fromIntegral dataLen,) <$>
+                Stream.runGet stream (getByteString dataLen)
 
-        liftIO . f $ d
+        f d
         return (fromIntegral dataLen)
       where
         showPacketHeader :: PacketHeader -> String
