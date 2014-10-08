@@ -63,7 +63,7 @@ mkSocketStream :: S.Socket -> IO Stream
 mkSocketStream socket = mkStream receive send
   where
     receive = do
-        bs <- B.recv socket 4096
+        bs <- B.recv socket (1024*1024)
         return $ if B.null bs then Nothing else Just bs
 
     send Nothing   = return ()
