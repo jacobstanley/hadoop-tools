@@ -1,6 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 
 module Network.Hadoop.Read
@@ -13,9 +14,9 @@ module Network.Hadoop.Read
     ) where
 
 import           Control.Applicative (Applicative(..), (<$>))
-import           Control.Exception (throwIO)
+import           Control.Exception (SomeException, throwIO)
 import           Control.Monad (guard)
-import           Control.Monad.Catch (MonadMask)
+import           Control.Monad.Catch (MonadMask, catch)
 import           Control.Monad.IO.Class (MonadIO(..))
 import           Data.Attoparsec.Text (Parser, char, decimal, parseOnly)
 import           Data.Bits
@@ -83,8 +84,11 @@ hdfsMapM_ f (HdfsReadHandle proxy l) = do
         let extended = getField . lbExtended $ b
             token = getField . lbToken $ b
         case getField . lbLocations $ b of
-            []  -> error $ "No locations for block " ++ show extended
-            l:_ -> getLoc proxy len extended token l
+            [] -> error $ "No locations for block " ++ show extended
+            ls -> failover $ map (getLoc proxy len extended token) ls
+
+    failover (x:xs) = catch x f where f (_ :: SomeException) = failover xs
+
     getLoc proxy len extended token l = do
         let i = getField (dnId l)
             Right addr = parseOnly parseIPv4 . getField . dnIpAddr $ i
