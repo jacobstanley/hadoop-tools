@@ -82,8 +82,10 @@ hdfsMapM_ f (HdfsReadHandle proxy l) = do
     showBlock proxy len b = do
         let extended = getField . lbExtended $ b
             token = getField . lbToken $ b
-        mapM_ (showLoc proxy len extended token) (getField . lbLocations $ b)
-    showLoc proxy len extended token l = do
+        case getField . lbLocations $ b of
+            []  -> error $ "No locations for block " ++ show extended
+            l:_ -> getLoc proxy len extended token l
+    getLoc proxy len extended token l = do
         let i = getField (dnId l)
             Right addr = parseOnly parseIPv4 . getField . dnIpAddr $ i
             host = getField . dnHostName $ i
