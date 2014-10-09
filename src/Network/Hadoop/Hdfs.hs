@@ -21,6 +21,7 @@ module Network.Hadoop.Hdfs
     , mkdirs
     , delete
     , rename
+    , setPermissions
     ) where
 
 import           Control.Applicative (Applicative(..), (<$>))
@@ -33,6 +34,7 @@ import           Data.Maybe (fromMaybe)
 import           Data.Text (Text)
 import qualified Data.Text.Encoding as T
 import qualified Data.Vector as V
+import           Data.Word (Word32)
 
 import qualified Data.Hadoop.Protobuf.ClientNameNode as P
 import qualified Data.Hadoop.Protobuf.Hdfs as P
@@ -196,6 +198,16 @@ rename overwrite src dst = ignore <$>
     }
   where
     ignore :: P.Rename2Response -> ()
+    ignore = const ()
+
+setPermissions :: Word32 -> HdfsPath -> Hdfs ()
+setPermissions mode path = ignore <$>
+    hdfsInvoke "setPermission" P.SetPermissionRequest
+    { P.chmodPath = putField (T.decodeUtf8 path)
+    , P.chmodMode = putField $ P.FilePermission { fpPerm = putField mode }
+    }
+  where
+    ignore :: P.SetPermissionResponse -> ()
     ignore = const ()
 
 ------------------------------------------------------------------------

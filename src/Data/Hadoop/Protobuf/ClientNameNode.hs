@@ -118,6 +118,23 @@ instance Decode Rename2Response
 
 ------------------------------------------------------------------------
 
+data SetPermissionRequest = SetPermissionRequest
+    { chmodPath       :: Required 1 (Value Text)
+    , chmodMode       :: Required 2 (Message FilePermission)
+    } deriving (Generic, Show)
+
+instance Encode SetPermissionRequest
+instance Decode SetPermissionRequest
+
+data SetPermissionResponse = SetPermissionResponse
+    {
+    } deriving (Generic, Show)
+
+instance Encode SetPermissionResponse
+instance Decode SetPermissionResponse
+
+------------------------------------------------------------------------
+
 data GetBlockLocationsRequest = GetBlockLocationsRequest
     { catSrc    :: Required 1 (Value Text)
     , catOffset :: Required 2 (Value Int64)
