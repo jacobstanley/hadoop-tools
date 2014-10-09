@@ -85,9 +85,12 @@ hdfsMapM_ f (HdfsReadHandle proxy l) = do
             token = getField . lbToken $ b
         case getField . lbLocations $ b of
             [] -> error $ "No locations for block " ++ show extended
-            ls -> failover $ map (getLoc proxy len extended token) ls
+            ls -> failover (error $ "All locations failed for block " ++ show extended)
+                           (map (getLoc proxy len extended token) ls)
 
-    failover (x:xs) = catch x f where f (_ :: SomeException) = failover xs
+    failover err [] = err
+    failover err (x:xs) = catch x f
+      where f (_ :: SomeException) = failover err xs
 
     getLoc proxy len extended token l = do
         let i = getField (dnId l)
