@@ -216,13 +216,13 @@ subGet :: SubCommand
 subGet = SubCommand "get" "Get a file" go
   where
     go = get <$> argument bstr (completePath <> help "source file")
-             <*> optional (argument bstr (completePath <> help "destination file"))
+             <*> optional (argument str (completePath <> help "destination file"))
     get src mdst = SubHdfs $ do
-      let dst = fromMaybe src mdst
+      let dst = fromMaybe (takeFileName $ B.unpack src) mdst
       absSrc <- getAbsolute src
       mReadHandle <- openRead absSrc
       let doRead readHandle = liftIO $ bracket
-              (openFile (B.unpack dst) WriteMode)
+              (openFile dst WriteMode)
               (hClose)
               (\writeHandle -> hdfsMapM_ (B.hPut writeHandle) readHandle)
       maybe (return ()) doRead mReadHandle
