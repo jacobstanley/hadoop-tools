@@ -8,6 +8,7 @@ module Network.Hadoop.Read
     ( HdfsReadHandle
     , openRead
     , hdfsMapM_
+    , hdfsFoldM
 
     -- * Convenience utilities
     , hdfsCat
@@ -15,7 +16,7 @@ module Network.Hadoop.Read
 
 import           Control.Applicative (Applicative(..), (<$>))
 import           Control.Exception (SomeException, throwIO)
-import           Control.Monad (guard)
+import           Control.Monad (guard, foldM)
 import           Control.Monad.Catch (MonadMask, catch)
 import           Control.Monad.IO.Class (MonadIO(..))
 import           Data.Attoparsec.Text (Parser, char, decimal, parseOnly)
@@ -76,18 +77,24 @@ hdfsCat path = do
 -- | Map an action over the contents of a file on HDFS.
 hdfsMapM_ :: (MonadIO m, MonadMask m) =>
     (ByteString -> m ()) -> HdfsReadHandle -> m ()
-hdfsMapM_ f (HdfsReadHandle proxy l) = do
+hdfsMapM_ f = hdfsFoldM (\_ x -> f x) ()
+
+hdfsFoldM :: (MonadIO m, MonadMask m) =>
+    (a -> ByteString -> m a) -> a -> HdfsReadHandle -> m a
+hdfsFoldM f acc0 (HdfsReadHandle proxy l) = do
         let len = getField . lbFileLength $ l
-        mapM_ (showBlock proxy len) (getField . lbBlocks $ l)
-  where
-    showBlock proxy len b = do
+        foldM (procBlock f proxy len) acc0 (getField . lbBlocks $ l)
+
+procBlock :: (MonadIO m, MonadMask m) =>
+    (a -> ByteString -> m a) -> Maybe SocksProxy -> Word64 -> a -> LocatedBlock -> m a
+procBlock f proxy len acc0 b = do
         let extended = getField . lbExtended $ b
             token = getField . lbToken $ b
         case getField . lbLocations $ b of
             [] -> error $ "No locations for block " ++ show extended
             ls -> failover (error $ "All locations failed for block " ++ show extended)
                            (map (getLoc proxy len extended token) ls)
-
+  where
     failover err [] = err
     failover err (x:xs) = catch x f
       where f (_ :: SomeException) = failover err xs
@@ -98,27 +105,27 @@ hdfsMapM_ f (HdfsReadHandle proxy l) = do
             host = getField . dnHostName $ i
             port = getField . dnXferPort $ i
         let endpoint = Endpoint host (fromIntegral port)
-        catBlock proxy endpoint 0 len extended token
+        runBlock proxy endpoint 0 len extended token
 
-    catBlock proxy endpoint offset len0 extended token = do
+    runBlock proxy endpoint offset len0 extended token = do
         let len = fromMaybe len0 . getField . ebNumBytes $ extended
-        S.runTcp proxy endpoint $ readBlocks offset len extended token
+        S.runTcp proxy endpoint $ readBlock offset len extended token
 
-    readBlocks offset len extended token sock = go 0 offset len
+    readBlock offset len extended token sock = go 0 offset len acc0
       where
-        go nread0 offset0 rem0 = do
-            len <- readBlock offset0 rem0 extended token sock
+        go nread0 offset0 rem0 acc = do
+            (len, acc') <- readBlockPart offset0 rem0 extended token sock acc
             let offset = offset0 + len
                 nread = nread0 + len
                 rem = rem0 - len
-            if rem > 0 then go nread offset rem else return ()
+            if rem > 0 then go nread offset rem acc' else return acc'
 
-    readBlock offset rem extended token sock = do
-        stream <- liftIO  $Stream.mkSocketStream sock
+    readBlockPart offset rem extended token sock acc = do
+        stream <- liftIO $ Stream.mkSocketStream sock
         b <- liftIO $ do
             Stream.runPut stream putReadRequest
             Stream.runGet stream decodeLengthPrefixedMessage
-        readPackets b rem stream
+        readPackets b rem stream acc
       where
 
         putReadRequest = do
@@ -145,19 +152,19 @@ hdfsMapM_ f (HdfsReadHandle proxy l) = do
         showBlockOpResponse :: BlockOpResponse -> String
         showBlockOpResponse = show
 
-    readPackets BlockOpResponse{..} len stream = go 0 len
+    readPackets BlockOpResponse{..} len stream acc1 = go 0 len acc1
       where
-        go nread0 rem0 = do
-            len <- readPacket b rem0 stream
+        go nread0 rem0 acc = do
+            (len, acc') <- readPacket b rem0 stream acc
             let rem = rem0 - len
                 nread = nread0 + len
-            if rem > 0 then go nread rem else return nread
+            if rem > 0 then go nread rem acc' else return (nread, acc')
 
         m = getField borReadOpChecksumInfo
         c = getField . rociChecksum <$> m
         b = fromIntegral . getField . csBytesPerChecksum <$> c
 
-    readPacket bytesPerChecksum remaining stream = do
+    readPacket bytesPerChecksum remaining stream acc = do
         (dataLen, d) <- liftIO $ do
             len <- Stream.runGet stream getWord32be
             sz <- Stream.runGet stream getWord16be
@@ -171,8 +178,8 @@ hdfsMapM_ f (HdfsReadHandle proxy l) = do
             (fromIntegral dataLen,) <$>
                 Stream.runGet stream (getByteString dataLen)
 
-        f d
-        return (fromIntegral dataLen)
+        acc' <- f acc d
+        return (fromIntegral dataLen, acc')
       where
         showPacketHeader :: PacketHeader -> String
         showPacketHeader = show
