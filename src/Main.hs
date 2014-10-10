@@ -443,8 +443,11 @@ isAccessDenied (RemoteError s _) = s == "org.apache.hadoop.security.AccessContro
 infixr 5 //
 
 (//) :: HdfsPath -> HdfsPath -> HdfsPath
-(//) xs ys | B.isPrefixOf "/" ys = ys
-           | otherwise           = trimEnd '/' xs <> "/" <> ys
+(//) xs ys | B.null xs        = ys
+           | B.null ys        = xs
+           | B.head ys == '/' = ys
+           | B.last xs == '/' = xs <> ys
+           | otherwise        = xs <> "/" <> ys
 
 trimEnd :: Char -> ByteString -> ByteString
 trimEnd b bs | B.null bs      = B.empty
