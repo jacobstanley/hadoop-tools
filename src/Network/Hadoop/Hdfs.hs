@@ -162,8 +162,8 @@ getPartialListing path startAfter = getField . P.lsDirList <$>
     , P.lsNeedLocation = putField False
     }
 
-getFileInfo :: HdfsPath -> Hdfs (Maybe P.FileStatus)
-getFileInfo path = getField . P.fiFileStatus <$>
+getFileInfo :: HdfsPath -> Hdfs (Maybe FileStatus)
+getFileInfo path = fmap fromProtoFileStatus . getField . P.fiFileStatus <$>
     hdfsInvoke "getFileInfo" P.GetFileInfoRequest
     { P.fiSrc = putField (T.decodeUtf8 path)
     }
