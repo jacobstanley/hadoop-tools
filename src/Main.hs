@@ -218,8 +218,8 @@ subChMod = SubCommand "chmod" "Change permissions" go
     modifyPerms :: Word16 -> HdfsPath -> Hdfs ()
     modifyPerms mode path = do
         absPath <- getAbsolute path
-        info <- getFileInfo absPath
-        case info of
+        minfo <- getFileInfo absPath
+        case minfo of
             Nothing -> fail $ unwords ["No such file", B.unpack absPath]
             Just FileStatus{..} -> do
                 {-
