@@ -41,7 +41,9 @@ import           Data.Hadoop.Types
 import           Network.Hadoop.Hdfs hiding (runHdfs)
 import           Network.Hadoop.Read
 
+import           Chmod
 import qualified Glob as Glob
+
 import           Paths_hadoop_tools (version)
 
 ------------------------------------------------------------------------
@@ -209,15 +211,7 @@ subChMod = SubCommand "chmod" "Change permissions" go
     chmod modeS path = either
         (\_ -> error $ "Unknown mode" ++ B.unpack modeS)
         (\mode -> SubHdfs $ modifyPerms mode path)
-        (Atto.parseOnly parseMode modeS)
-
-    parseMode = octal
-
-    octal :: Atto.Parser Word16
-    octal = B.foldl' step 0 `fmap` Atto.takeWhile1 isDig
-      where
-        isDig w = w >= '0' && w <= '7'
-        step a w = a * 8 + fromIntegral (ord w - 48)
+        (Atto.parseOnly parseChmod modeS)
 
     modifyPerms :: Word16 -> HdfsPath -> Hdfs ()
     modifyPerms mode path = do
