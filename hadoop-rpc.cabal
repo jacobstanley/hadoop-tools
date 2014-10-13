@@ -1,7 +1,18 @@
 name:          hadoop-rpc
 version:       0.1.0.0
-synopsis:      Use the Hadoop RPC interface from Haskell.
-description:   Use the Hadoop RPC interface from Haskell.
+
+synopsis:
+  Use the Hadoop RPC interface from Haskell.
+
+description:
+  Use the Hadoop RPC interface from Haskell.
+  .
+  Currently we only support v7 of the RPC protocol (< CDH5).
+  .
+  Support for v9 (>= CDH5) is coming soon.
+  .
+  /The API is still evolving and is highly likely to change in the future./
+
 homepage:      http://github.com/jystic/hadoop-rpc
 license:       Apache-2.0
 license-file:  LICENSE
