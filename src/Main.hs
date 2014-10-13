@@ -265,7 +265,7 @@ subGet = SubCommand "get" "Get a file" go
 subList :: SubCommand
 subList = SubCommand "ls" "List the contents of a directory" go
   where
-    go = ls <$> optional (argument bstr (completeDir <> help "the directory to list"))
+    go = ls <$> optional (argument bstr (completePath <> help "the directory to list"))
     ls path = SubHdfs $ printListing =<< getAbsolute (fromMaybe "" path)
 
 subMkDir :: SubCommand
