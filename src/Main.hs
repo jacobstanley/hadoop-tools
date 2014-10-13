@@ -452,11 +452,6 @@ infixr 5 //
            | B.last xs == '/' = xs <> ys
            | otherwise        = xs <> "/" <> ys
 
-trimEnd :: Char -> ByteString -> ByteString
-trimEnd b bs | B.null bs      = B.empty
-             | B.last bs == b = trimEnd b (B.init bs)
-             | otherwise      = bs
-
 ------------------------------------------------------------------------
 
 getListingOrFail :: HdfsPath -> Hdfs (V.Vector FileStatus)
