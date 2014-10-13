@@ -24,12 +24,12 @@ tests :: TestTree
 tests = testGroup "Tests" [unitTests]
 
 unitTests = testGroup "Unit tests"
-  [ testChmod "755" (493)
-  , testChmod "0755" (493)
+  [ testChmod "755" (SetMode 493)
+  , testChmod "0755" (SetMode 493)
   , testChmodShouldFail "kittens"
   ]
 
-testChmod :: ByteString -> Word16 -> TestTree
+testChmod :: ByteString -> Chmod -> TestTree
 testChmod input expected =
     testCase (unwords ["Parse chmod", B.unpack input]) $
         parseOnly parseChmod input @?= Right expected

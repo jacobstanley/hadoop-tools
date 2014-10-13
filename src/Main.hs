@@ -213,7 +213,7 @@ subChMod = SubCommand "chmod" "Change permissions" go
         (\mode -> SubHdfs $ modifyPerms mode path)
         (Atto.parseOnly parseChmod modeS)
 
-    modifyPerms :: Word16 -> HdfsPath -> Hdfs ()
+    modifyPerms :: Chmod -> HdfsPath -> Hdfs ()
     modifyPerms mode path = do
         absPath <- getAbsolute path
         minfo <- getFileInfo absPath
@@ -225,7 +225,7 @@ subChMod = SubCommand "chmod" "Change permissions" go
                 liftIO . putStrLn . unwords $ ["OLD:", formatMode fsFileType fsPermission]
                 liftIO . putStrLn . unwords $ ["NEW:", formatMode fsFileType mode]
                 -}
-                setPermissions (fromIntegral mode) absPath
+                setPermissions (fromIntegral $ applyChmod mode fsPermission) absPath
 
 subDiskUsage :: SubCommand
 subDiskUsage = SubCommand "du" "Show the amount of space used by file or directory" go
