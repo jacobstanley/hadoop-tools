@@ -373,7 +373,10 @@ printListing path = do
                <+> col left  (T.unpack . fsGroup)
                <+> col right (formatSize . fsLength)
                <+> col right (formatUTC . getModTime)
-               <+> col left  (T.unpack . T.decodeUtf8 . fsPath)
+               <+> col left  (ifEmpty basePath . T.unpack . T.decodeUtf8 . fsPath)
+  where
+    ifEmpty def x = if x=="" then def else x
+    basePath = takeFileName (B.unpack path)
 
 printFindResults :: HdfsPath -> (FileStatus -> Bool) -> Hdfs ()
 printFindResults path cond = handle (liftIO . printError) $ do
