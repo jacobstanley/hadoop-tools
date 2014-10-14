@@ -213,7 +213,7 @@ subChMod = SubCommand "chmod" "Change permissions" go
         (\mode -> SubHdfs $ modifyPerms mode path)
         (Atto.parseOnly parseChmod modeS)
 
-    modifyPerms :: Chmod -> HdfsPath -> Hdfs ()
+    modifyPerms :: [Chmod] -> HdfsPath -> Hdfs ()
     modifyPerms mode path = do
         absPath <- getAbsolute path
         minfo <- getFileInfo absPath
