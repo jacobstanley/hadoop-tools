@@ -1,7 +1,29 @@
 name:          hadoop-tools
 version:       0.4
-synopsis:      Fast command line tools for working with Hadoop.
-description:   Fast command line tools for working with Hadoop.
+
+synopsis:
+  Fast command line tools for working with Hadoop.
+
+description:
+  hh - Blazing fast interaction with HDFS
+  .
+  Currently we only support v7 of the RPC protocol (< CDH5).
+  .
+  Support for v9 (>= CDH5) is coming soon.
+  .
+  > hh cat     - Print the contents of a file to stdout
+  > hh cd      - Change working directory
+  > hh chmod   - Change permissions
+  > hh du      - Show the amount of space used by file or directory
+  > hh find    - Recursively search a directory tree
+  > hh get     - Get a file
+  > hh ls      - List the contents of a directory
+  > hh mkdir   - Create a directory in the specified location
+  > hh pwd     - Print working directory
+  > hh rm      - Delete a file or directory
+  > hh mv      - Rename a file or directory
+  > hh version - Show version information
+
 homepage:      http://github.com/jystic/hadoop-tools
 license:       Apache-2.0
 license-file:  LICENSE
