@@ -432,9 +432,9 @@ formatPermission perms = format (perms `shiftR` 6)
 
 printError :: RemoteError -> IO ()
 printError (RemoteError subject body)
-    | oneLiner    = T.putStrLn firstLine
-    | T.null body = T.putStrLn subject
-    | otherwise   = T.putStrLn subject >> T.putStrLn body
+    | oneLiner    = T.hPutStrLn stderr firstLine
+    | T.null body = T.hPutStrLn stderr subject
+    | otherwise   = T.hPutStrLn stderr subject >> T.putStrLn body
   where
     oneLiner  = subject `elem` [ "org.apache.hadoop.security.AccessControlException"
                                , "org.apache.hadoop.fs.FileAlreadyExistsException"
