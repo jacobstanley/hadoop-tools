@@ -137,6 +137,7 @@ dropAbsParentDir (p : ps) = p : reverse (fst $ go [] ps)
   where
     go []       (".." : ys) = go [] ys
     go (_ : xs) (".." : ys) = go xs ys
+    go xs       ("."  : ys) = go xs ys
     go xs       (y    : ys) = go (y : xs) ys
     go xs       []          = (xs, [])
 
@@ -312,9 +313,9 @@ subVersion = SubCommand "version" "Show version information" go
 ------------------------------------------------------------------------
 
 fileCompletion :: (FileType -> Bool) -> Completer
-fileCompletion p = mkCompleter $ \spath -> handle ignore $ runHdfs $ do
-    let dir  = B.pack $ fst $ splitFileName' spath
-        path = B.pack spath
+fileCompletion p = mkCompleter $ \strPath -> handle ignore $ runHdfs $ do
+    let path = B.pack strPath
+        dir  = takeParent path
 
     ls <- getListing' =<< getAbsolute dir
 
@@ -327,9 +328,11 @@ fileCompletion p = mkCompleter $ \spath -> handle ignore $ runHdfs $ do
   where
     ignore (RemoteError _ _) = return []
 
-    splitFileName' x = case splitFileName x of
-        ("./", f) -> ("", f)
-        (d, f)    -> (d, f)
+takeParent :: HdfsPath -> HdfsPath
+takeParent bs = case B.elemIndexEnd '/' bs of
+    Nothing -> B.empty
+    Just 0  -> "/"
+    Just ix -> B.take ix bs
 
 displayPath :: HdfsPath -> FileStatus -> HdfsPath
 displayPath parent file = parent // fsPath file <> suffix
