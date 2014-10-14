@@ -64,11 +64,11 @@ instance Applicative Hdfs where
     (<*>) = ap
 
 instance Monad Hdfs where
-    return  = pure
+    return  = Hdfs . const . return
     m >>= k = Hdfs $ \c -> unHdfs m c >>= \x -> unHdfs (k x) c
 
 instance MonadIO Hdfs where
-    liftIO io = Hdfs $ const io
+    liftIO = Hdfs . const
 
 instance MonadThrow Hdfs where
     throwM = liftIO . throwM
