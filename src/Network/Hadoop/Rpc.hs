@@ -35,7 +35,7 @@ import           Data.ProtocolBuffers.Orphans ()
 import           Data.Serialize.Get
 import           Data.Serialize.Put
 
-import           Data.Hadoop.Protobuf.Headers
+import qualified Data.Hadoop.Protobuf.Headers as P
 import           Data.Hadoop.Types
 import qualified Network.Hadoop.Stream as S
 import           Network.Socket (Socket)
@@ -83,7 +83,7 @@ initConnectionV7 config@HadoopConfig{..} protocol sock = do
         putWord8 80 -- auth method (80 = simple, 81 = kerberos/gssapi, 82 = token/digest-md5)
         putWord8 0  -- ipc serialization type (0 = protobuf)
 
-        let bs = runPut (encodeMessage context)
+        let bs = runPut (encodeMessage (contextProto protocol hcUser))
         putWord32be (fromIntegral (B.length bs))
         putByteString bs
 
@@ -123,7 +123,7 @@ initConnectionV7 config@HadoopConfig{..} protocol sock = do
             modifyTVar' csRecvCallbacks (H.insert callId k)
 
             return $ runPut $ encodeLengthPrefixedMessage (requestHeaderProto callId)
-                           >> encodeLengthPrefixedMessage (requestProto method requestBytes)
+                           >> encodeLengthPrefixedMessage (requestProto protocol method requestBytes)
 
         S.runPut csStream $ do
             putWord32be (fromIntegral (B.length bs))
@@ -136,10 +136,10 @@ initConnectionV7 config@HadoopConfig{..} protocol sock = do
           Nothing     -> throwIO ConnectionClosed
           Just rspHdr -> do
             onResponse <- fromMaybe (return $ return ())
-                      <$> lookupDelete csRecvCallbacks (fromIntegral $ getField $ rspCallId rspHdr)
-            case getField (rspStatus rspHdr) of
-              Success -> S.runGet csStream getResponse >>= onResponse . Right
-              _       -> S.runGet csStream getError    >>= onResponse . Left . SomeException
+                      <$> lookupDelete csRecvCallbacks (fromIntegral $ getField $ P.rspCallId rspHdr)
+            case getField (P.rspStatus rspHdr) of
+              P.Success -> S.runGet csStream getResponse >>= onResponse . Right
+              _         -> S.runGet csStream getError    >>= onResponse . Left . SomeException
 
     onSocketError :: ConnectionState -> SomeException -> IO ()
     onSocketError ConnectionState{..} ex = do
@@ -153,27 +153,6 @@ initConnectionV7 config@HadoopConfig{..} protocol sock = do
 
     ignore :: SomeException -> IO ()
     ignore _ = return ()
-
-    context = IpcConnectionContext
-        { ctxProtocol = putField (Just (prName protocol))
-        , ctxUserInfo = putField (Just UserInformation
-            { effectiveUser = putField (Just hcUser)
-            , realUser      = mempty
-            })
-        }
-
-    requestHeaderProto callId = RpcRequestHeader
-        { reqKind       = putField (Just ProtocolBuffer)
-        , reqOp         = putField (Just FinalPacket)
-        , reqCallId     = putField (fromIntegral callId)
-        }
-
-    requestProto method bytes = RpcRequest
-        { reqMethodName      = putField method
-        , reqBytes           = putField (Just bytes)
-        , reqProtocolName    = putField (prName protocol)
-        , reqProtocolVersion = putField (fromIntegral (prVersion protocol))
-        }
 
 unfoldM :: Monad m => m (Maybe a) -> m [a]
 unfoldM f = go []
@@ -191,6 +170,30 @@ lookupDelete var k = atomically $ do
     return (H.lookup k hm)
 
 ------------------------------------------------------------------------
+
+contextProto :: Protocol -> User -> P.IpcConnectionContext
+contextProto protocol user = P.IpcConnectionContext
+    { P.ctxProtocol = putField (Just (prName protocol))
+    , P.ctxUserInfo = putField (Just P.UserInformation
+        { P.effectiveUser = putField (Just user)
+        , P.realUser      = mempty
+        })
+    }
+
+requestHeaderProto :: CallId -> P.RpcRequestHeader
+requestHeaderProto callId = P.RpcRequestHeader
+    { P.reqKind       = putField (Just P.ProtocolBuffer)
+    , P.reqOp         = putField (Just P.FinalPacket)
+    , P.reqCallId     = putField (fromIntegral callId)
+    }
+
+requestProto :: Protocol -> Method -> ByteString -> P.RpcRequest
+requestProto protocol method bytes = P.RpcRequest
+    { P.reqMethodName      = putField method
+    , P.reqBytes           = putField (Just bytes)
+    , P.reqProtocolName    = putField (prName protocol)
+    , P.reqProtocolVersion = putField (fromIntegral (prVersion protocol))
+    }
 
 getResponse :: Get ByteString
 getResponse = do
