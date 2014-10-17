@@ -109,7 +109,7 @@ procBlock f proxy len acc0 b = do
 
     runBlock proxy endpoint offset len0 extended token = do
         let len = fromMaybe len0 . getField . ebNumBytes $ extended
-        S.runTcp proxy endpoint $ readBlock offset len extended token
+        S.bracketSocket proxy endpoint $ readBlock offset len extended token
 
     readBlock offset len extended token sock = go 0 offset len acc0
       where

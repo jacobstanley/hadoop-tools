@@ -103,7 +103,7 @@ runHdfs hdfs = do
     runHdfs' config hdfs
 
 runHdfs' :: HadoopConfig -> Hdfs a -> IO a
-runHdfs' config@HadoopConfig{..} hdfs = S.runTcp hcProxy nameNode session
+runHdfs' config@HadoopConfig{..} hdfs = S.bracketSocket hcProxy nameNode session
   where
     session socket = do
         conn <- initConnectionV7 config hdfsProtocol socket
