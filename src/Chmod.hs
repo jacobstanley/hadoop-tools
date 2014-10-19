@@ -102,8 +102,10 @@ applyChmod cs old = foldl' f old cs
 
     foldRWX = foldl' (\old what -> old .|. b what) 0
 
+    o3 u g o = u*64 + g*8 + o
+
     mask :: ChmodWho -> Word16
-    mask Chmod_a = 777
+    mask Chmod_a = o3 7 7 7
     mask who     = 7 `shiftL` s who
 
     setWho :: ChmodWho -> Word16 -> Word16
