@@ -225,7 +225,7 @@ subChMod = SubCommand "chmod" "Change permissions" go
                 liftIO . putStrLn . unwords $ ["OLD:", formatMode fsFileType fsPermission]
                 liftIO . putStrLn . unwords $ ["NEW:", formatMode fsFileType mode]
                 -}
-                setPermissions (fromIntegral $ applyChmod mode fsPermission) absPath
+                setPermissions (fromIntegral $ applyChmod fsFileType mode fsPermission) absPath
 
 subDiskUsage :: SubCommand
 subDiskUsage = SubCommand "du" "Show the amount of space used by file or directory" go

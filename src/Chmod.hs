@@ -17,6 +17,10 @@ import           Data.List (foldl')
 import           Data.Maybe (mapMaybe)
 import           Data.Word (Word16, Word32)
 
+import           Data.Hadoop.Types (FileType(..))
+
+------------------------------------------------------------------------
+
 data ChmodWho = Chmod_u | Chmod_g | Chmod_o | Chmod_a 
     deriving (Show, Eq)
 data ChmodWhat = Chmod_r | Chmod_w | Chmod_x | Chmod_X
@@ -79,8 +83,8 @@ parseChmod = do
         isDig w = w >= '0' && w <= '7'
         step a w = a * 8 + fromIntegral (ord w - 48)
 
-applyChmod :: [Chmod] -> Word16 -> Word16
-applyChmod cs old = foldl' f old cs
+applyChmod :: FileType -> [Chmod] -> Word16 -> Word16
+applyChmod filetype cs old = foldl' f old cs
   where
     f :: Word16 -> Chmod -> Word16
     f _   (SetOctal new)        = new
@@ -119,7 +123,7 @@ applyChmod cs old = foldl' f old cs
 
     -- handle X
     hX :: Word16 -> ChmodWhat -> Maybe ChmodWhat
-    hX old Chmod_X = if old .&. o3 1 1 1 /= 0
+    hX old Chmod_X = if filetype == Dir || old .&. o3 1 1 1 /= 0
                          then Just Chmod_x
                          else Nothing
     hX _   what    = Just what

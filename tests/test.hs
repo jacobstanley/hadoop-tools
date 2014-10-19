@@ -12,6 +12,8 @@ import qualified Data.ByteString.Char8 as B
 import           Data.Either
 import           Data.Word (Word16, Word32)
 
+import           Data.Hadoop.Types (FileType(..))
+
 import           Chmod
 
 ------------------------------------------------------------
@@ -29,42 +31,46 @@ unitTests = testGroup "Unit tests"
   , testChmod "u=r"  [SetEqual Chmod_u [Chmod_r]]
   , testChmodShouldFail "kittens"
   
-  , testApplyChmod [SetEqual    Chmod_o [Chmod_r]]
+  , testApplyChmod File [SetEqual    Chmod_o [Chmod_r]]
         (oct 0 0 0) (oct 0 0 4)
-  , testApplyChmod [SetEqual    Chmod_o [Chmod_r, Chmod_w]]
+  , testApplyChmod File [SetEqual    Chmod_o [Chmod_r, Chmod_w]]
         (oct 0 0 0) (oct 0 0 6)
-  , testApplyChmod [SetEqual    Chmod_g [Chmod_r]]
+  , testApplyChmod File [SetEqual    Chmod_g [Chmod_r]]
         (oct 0 0 0) (oct 0 4 0)
-  , testApplyChmod [SetPlus     Chmod_o [Chmod_w]]
+  , testApplyChmod File [SetPlus     Chmod_o [Chmod_w]]
         (oct 0 0 4) (oct 0 0 6)
-  , testApplyChmod [SetPlus     Chmod_o [Chmod_w,Chmod_r]]
+  , testApplyChmod File [SetPlus     Chmod_o [Chmod_w,Chmod_r]]
         (oct 0 0 1) (oct 0 0 7)
-  , testApplyChmod [SetMinus    Chmod_o [Chmod_w]]
+  , testApplyChmod File [SetMinus    Chmod_o [Chmod_w]]
         (oct 0 0 6) (oct 0 0 4)
-  , testApplyChmod [SetMinus    Chmod_o [Chmod_w,Chmod_r]]
+  , testApplyChmod File [SetMinus    Chmod_o [Chmod_w,Chmod_r]]
         (oct 0 0 7) (oct 0 0 1)
-  , testApplyChmod [SetEqualWho Chmod_g Chmod_o]
+  , testApplyChmod File [SetEqualWho Chmod_g Chmod_o]
         (oct 0 0 1) (oct 0 1 1)
-  , testApplyChmod [SetPlusWho  Chmod_g Chmod_o]
+  , testApplyChmod File [SetPlusWho  Chmod_g Chmod_o]
         (oct 0 2 1) (oct 0 3 1)
-  , testApplyChmod [SetMinusWho Chmod_g Chmod_o]
+  , testApplyChmod File [SetMinusWho Chmod_g Chmod_o]
         (oct 0 3 1) (oct 0 2 1)
-  , testApplyChmod [SetMinusWho Chmod_g Chmod_o]
+  , testApplyChmod File [SetMinusWho Chmod_g Chmod_o]
         (oct 0 3 1) (oct 0 2 1)
-  , testApplyChmod [SetEqual    Chmod_a [Chmod_r]]
+  , testApplyChmod File [SetEqual    Chmod_a [Chmod_r]]
         (oct 0 0 0) (oct 4 4 4)
-  , testApplyChmod [SetPlus     Chmod_a [Chmod_r]]
+  , testApplyChmod File [SetPlus     Chmod_a [Chmod_r]]
         (oct 0 1 0) (oct 4 5 4)
-  , testApplyChmod [SetMinus    Chmod_a [Chmod_x]]
+  , testApplyChmod File [SetMinus    Chmod_a [Chmod_x]]
         (oct 7 5 5) (oct 6 4 4)
-  , testApplyChmod [SetEqualWho Chmod_a Chmod_u]
+  , testApplyChmod File [SetEqualWho Chmod_a Chmod_u]
         (oct 6 4 4) (oct 6 6 6)
-  , testApplyChmod [SetPlusWho  Chmod_a Chmod_u]
+  , testApplyChmod File [SetPlusWho  Chmod_a Chmod_u]
         (oct 7 5 5) (oct 7 7 7)
-  , testApplyChmod [SetMinusWho Chmod_a Chmod_o]
+  , testApplyChmod File [SetMinusWho Chmod_a Chmod_o]
         (oct 7 5 5) (oct 2 0 0)
 
-  , testApplyChmod [SetPlus     Chmod_o [Chmod_X]]
+  , testApplyChmod File [SetPlus     Chmod_o [Chmod_X]]
+        (oct 0 1 0) (oct 0 1 1)
+  , testApplyChmod Dir  [SetPlus     Chmod_o [Chmod_X]]
+        (oct 0 0 0) (oct 0 0 1)
+  , testApplyChmod Dir  [SetPlus     Chmod_o [Chmod_X]]
         (oct 0 1 0) (oct 0 1 1)
   ]
 
@@ -81,8 +87,8 @@ testChmodShouldFail input =
         assertBool "Failed to catch invalid chmod"
         (isLeft $ parseOnly parseChmod input)
 
-testApplyChmod :: [Chmod] -> Word16 -> Word16 -> TestTree
-testApplyChmod input old expected =
+testApplyChmod :: FileType -> [Chmod] -> Word16 -> Word16 -> TestTree
+testApplyChmod filetype input old expected =
     testCase (unwords ["Apply chmod", show input, "to", show old]) $
-        applyChmod input old @?= expected
+        applyChmod filetype input old @?= expected
 
