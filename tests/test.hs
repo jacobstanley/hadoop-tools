@@ -63,6 +63,9 @@ unitTests = testGroup "Unit tests"
         (oct 7 5 5) (oct 7 7 7)
   , testApplyChmod [SetMinusWho Chmod_a Chmod_o]
         (oct 7 5 5) (oct 2 0 0)
+
+  , testApplyChmod [SetPlus     Chmod_o [Chmod_X]]
+        (oct 0 1 0) (oct 0 1 1)
   ]
 
 oct u g o = u*64 + g*8 + o

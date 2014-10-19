@@ -14,6 +14,7 @@ import           Data.Bits
 import qualified Data.ByteString.Char8 as B
 import           Data.Char (ord)
 import           Data.List (foldl')
+import           Data.Maybe (mapMaybe)
 import           Data.Word (Word16, Word32)
 
 data ChmodWho = Chmod_u | Chmod_g | Chmod_o | Chmod_a 
@@ -65,8 +66,8 @@ parseChmod = do
         [ pure Chmod_r <* Atto.char 'r'
         , pure Chmod_w <* Atto.char 'w'
         , pure Chmod_x <* Atto.char 'x'
-        {-
         , pure Chmod_X <* Atto.char 'X'
+        {-
         , pure Chmod_s <* Atto.char 's'
         , pure Chmod_t <* Atto.char 't'
         -}
@@ -83,9 +84,9 @@ applyChmod cs old = foldl' f old cs
   where
     f :: Word16 -> Chmod -> Word16
     f _   (SetOctal new)        = new
-    f old (SetEqual who ws)     = set who old (foldRWX ws)
-    f old (SetPlus  who ws)     = plus who old (foldRWX ws)
-    f old (SetMinus who ws)     = minus who old (foldRWX ws)
+    f old (SetEqual who ws)     = set who old (foldRWX old ws)
+    f old (SetPlus  who ws)     = plus who old (foldRWX old ws)
+    f old (SetMinus who ws)     = minus who old (foldRWX old ws)
     f old (SetEqualWho who src) = set who old (extract src old)
     f old (SetPlusWho who src)  = plus who old (extract src old)
     f old (SetMinusWho who src) = minus who old (extract src old)
@@ -100,7 +101,7 @@ applyChmod cs old = foldl' f old cs
     minus :: ChmodWho -> Word16 -> Word16 -> Word16
     minus who old new = old `xor` setWho who new
 
-    foldRWX = foldl' (\old what -> old .|. b what) 0
+    foldRWX old = foldl' (\old what -> old .|. b what) 0 . mapMaybe (hX old)
 
     o3 u g o = u*64 + g*8 + o
 
@@ -115,6 +116,13 @@ applyChmod cs old = foldl' f old cs
 
     extract :: ChmodWho -> Word16 -> Word16
     extract who old = (mask who .&. old) `shiftR` s who
+
+    -- handle X
+    hX :: Word16 -> ChmodWhat -> Maybe ChmodWhat
+    hX old Chmod_X = if old .&. o3 1 1 1 /= 0
+                         then Just Chmod_x
+                         else Nothing
+    hX _   what    = Just what
 
     -- Bit to set for what
     b :: ChmodWhat -> Word16
