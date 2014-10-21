@@ -185,8 +185,8 @@ completePath = completer (fileCompletion (const True)) <> metavar "PATH"
 completeDir :: Mod ArgumentFields a
 completeDir  = completer (fileCompletion (== Dir)) <> metavar "DIRECTORY"
 
-bstr :: Monad m => String -> m ByteString
-bstr x = B.pack `liftM` str x
+bstr :: ReadM ByteString
+bstr = B.pack <$> str
 
 subCat :: SubCommand
 subCat = SubCommand "cat" "Print the contents of a file to stdout" go
