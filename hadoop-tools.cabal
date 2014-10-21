@@ -33,6 +33,9 @@ category:      Data
 build-type:    Simple
 cabal-version: >= 1.10
 
+extra-source-files:
+  bash-completion
+
 executable hh
   default-language: Haskell2010
 
@@ -43,6 +46,7 @@ executable hh
   ghc-prof-options: -auto-all -caf-all
 
   other-modules:
+    Glob
     Paths_hadoop_tools
 
   build-depends:
