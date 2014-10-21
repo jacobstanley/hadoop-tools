@@ -47,6 +47,7 @@ executable hh
 
   other-modules:
     Glob
+    Chmod
     Paths_hadoop_tools
 
   build-depends:
