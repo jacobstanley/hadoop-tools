@@ -316,13 +316,17 @@ subTest = SubCommand "test" "If file exists, has zero length, is a directory the
                <*> switch        (short 'e' <> help "Test exists")
                <*> switch        (short 'z' <> help "Test is zero length")
                <*> switch        (short 'd' <> help "Test is a directory")
-    test path e z d = SubHdfs $ do
+               <*> switch        (short 'f' <> help "Test is a regular file")
+               <*> switch        (short 'l' <> help "Test is a symbolic link")
+    test path e z d f l = SubHdfs $ do
         absPath <- getAbsolute path
         minfo <- getFileInfo absPath
         case minfo of
             Nothing -> fail $ unwords ["No such file/directory", B.unpack absPath]
             Just FileStatus{..} -> do
                 when (d && fsFileType /= Dir) $ fail . unwords $ ["Not a directory"]
+                when (f && fsFileType /= File) $ fail . unwords $ ["Not a regular file"]
+                when (l && fsFileType /= SymLink) $ fail . unwords $ ["Not a regular file"]
                 when (z && fsLength /= 0) $ fail . unwords $ ["Not zero length"]
 
 subVersion :: SubCommand
