@@ -186,6 +186,8 @@ allSubCommands =
     , subRemove
     , subRename
     , subTest
+    , subTestNewer
+    , subTestOlder
     , subVersion
     ]
 
@@ -347,6 +349,33 @@ subTest = SubCommand "test" "If file exists, has zero length, is a directory the
         hasPerm user groups FileStatus{..} p = (fsOwner == user && (fsPermission .&. (p `shiftL` 6)) /= 0) ||
                                                (fsGroup `elem` groups && (fsPermission .&. (p `shiftL` 3)) /= 0) ||
                                                ((fsPermission .&. p) /= 0)
+
+subTestNewer :: SubCommand
+subTestNewer = SubCommand "test-newer" "file1 is newer (modification time) than file2" go
+  where
+    go = testNewer <$> argument bstr (completePath <> help "file/directory")
+                   <*> argument bstr (completePath <> help "file/directory")
+                   <*> pure False
+
+subTestOlder :: SubCommand
+subTestOlder = SubCommand "test-older" "file1 is older (modification time) than file2" go
+  where
+    go = testNewer <$> argument bstr (completePath <> help "file/directory")
+                   <*> argument bstr (completePath <> help "file/directory")
+                   <*> pure True
+
+testNewer :: HdfsPath -> HdfsPath -> Bool -> SubMethod
+testNewer path1 path2 older = SubHdfs $ do
+    absPath1 <- getAbsolute path1
+    absPath2 <- getAbsolute path2
+    minfo1 <- getFileInfo absPath1
+    minfo2 <- getFileInfo absPath2
+    case (minfo1, minfo2, older) of
+        (Just fs1, Just fs2, False) -> do
+            when (fsModificationTime fs1 < fsModificationTime fs2) $ fail . unwords $ [B.unpack path1, "is older than", B.unpack path2]
+        (Just fs1, Just fs2, True) -> do
+            when (fsModificationTime fs1 > fsModificationTime fs2) $ fail . unwords $ [B.unpack path1, "is newer than", B.unpack path2]
+        _ -> fail $ unwords ["No such file/directory"]
 
 subVersion :: SubCommand
 subVersion = SubCommand "version" "Show version information" go
