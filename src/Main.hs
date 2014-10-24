@@ -28,6 +28,7 @@ import qualified Data.Configurator as C
 import           Data.Configurator.Types (Worth(..))
 import           Options.Applicative hiding (Success)
 import           System.Environment (getEnv)
+import           System.Exit (exitFailure)
 import qualified System.FilePath as FilePath
 import qualified System.FilePath.Posix as Posix
 import           System.IO
@@ -53,10 +54,11 @@ main = do
     cmd <- execParser optsParser
     case cmd of
       SubIO   io   -> io
-      SubHdfs hdfs -> handle printError (runHdfs hdfs)
+      SubHdfs hdfs -> handle exitError (runHdfs hdfs)
   where
     optsParser = info (helper <*> options)
                       (fullDesc <> header "hh - Blazing fast interaction with HDFS")
+    exitError err = printError err >> exitFailure
 
 runHdfs :: Hdfs a -> IO a
 runHdfs hdfs = do
