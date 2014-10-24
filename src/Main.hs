@@ -178,6 +178,7 @@ allSubCommands =
     , subPwd
     , subRemove
     , subRename
+    , subTest
     , subVersion
     ]
 
@@ -307,6 +308,22 @@ subRename = SubCommand "mv" "Rename a file or directory" go
       absSrc <- getAbsolute src
       absDst <- getAbsolute dst
       rename force absSrc absDst
+
+subTest :: SubCommand
+subTest = SubCommand "test" "If file exists, has zero length, is a directory then return 0, else return 1" go
+  where
+    go = test <$> argument bstr (completePath <> help "file/directory")
+               <*> switch        (short 'e' <> help "Test exists")
+               <*> switch        (short 'z' <> help "Test is zero length")
+               <*> switch        (short 'd' <> help "Test is a directory")
+    test path e z d = SubHdfs $ do
+        absPath <- getAbsolute path
+        minfo <- getFileInfo absPath
+        case minfo of
+            Nothing -> fail $ unwords ["No such file/directory", B.unpack absPath]
+            Just FileStatus{..} -> do
+                when (d && fsFileType /= Dir) $ fail . unwords $ ["Not a directory"]
+                when (z && fsLength /= 0) $ fail . unwords $ ["Not zero length"]
 
 subVersion :: SubCommand
 subVersion = SubCommand "version" "Show version information" go
