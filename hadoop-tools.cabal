@@ -68,6 +68,7 @@ executable hh
     , text                 >= 1.1
     , time                 >= 1.4
     , transformers         >= 0.4
+    , unix                 >= 2.7
     , vector               >= 0.10
 
 test-suite test

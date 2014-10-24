@@ -9,7 +9,7 @@ import           Control.Monad
 import           Control.Monad.Catch (handle, throwM)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import qualified Data.Attoparsec.ByteString.Char8 as Atto
-import           Data.Bits ((.&.), shiftR)
+import           Data.Bits ((.&.), shiftL, shiftR)
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as B
 import           Data.Char (ord)
@@ -34,9 +34,10 @@ import qualified System.FilePath.Posix as Posix
 import           System.IO
 import           System.IO.Unsafe (unsafePerformIO)
 import           System.Locale (defaultTimeLocale)
+import           System.Posix.User (GroupEntry(..), getGroups, getGroupEntryForID)
 import           Text.PrettyPrint.Boxes hiding ((<>), (//))
 
-import           Data.Hadoop.Configuration (getHadoopConfig)
+import           Data.Hadoop.Configuration (getHadoopConfig, getHadoopUser)
 import           Data.Hadoop.HdfsPath
 import           Data.Hadoop.Types
 import           Network.Hadoop.Hdfs hiding (runHdfs)
@@ -89,6 +90,12 @@ configPath = unsafePerformIO $ do
 
 getHdfsUser :: IO (Maybe User)
 getHdfsUser = C.load [Optional configPath] >>= flip C.lookup "hdfs.user"
+
+getGroupNames :: IO [Group]
+getGroupNames = do
+    groups <- getGroups
+    entries <- mapM getGroupEntryForID groups
+    return $ map (T.pack . groupName) entries
 
 getNameNode :: IO (Maybe NameNode)
 getNameNode = do
@@ -318,16 +325,28 @@ subTest = SubCommand "test" "If file exists, has zero length, is a directory the
                <*> switch        (short 'd' <> help "Test is a directory")
                <*> switch        (short 'f' <> help "Test is a regular file")
                <*> switch        (short 'l' <> help "Test is a symbolic link")
-    test path e z d f l = SubHdfs $ do
+               <*> switch        (short 'r' <> help "Test read permission is granted")
+               <*> switch        (short 'w' <> help "Test write permission is granted")
+               <*> switch        (short 'x' <> help "Test exectute permission is granted")
+    test path e z d f l r w x = SubHdfs $ do
         absPath <- getAbsolute path
         minfo <- getFileInfo absPath
+        user <- liftIO getHadoopUser
+        groups <- liftIO getGroupNames
         case minfo of
             Nothing -> fail $ unwords ["No such file/directory", B.unpack absPath]
-            Just FileStatus{..} -> do
+            Just fs@FileStatus{..} -> do
                 when (d && fsFileType /= Dir) $ fail . unwords $ ["Not a directory"]
                 when (f && fsFileType /= File) $ fail . unwords $ ["Not a regular file"]
                 when (l && fsFileType /= SymLink) $ fail . unwords $ ["Not a regular file"]
                 when (z && fsLength /= 0) $ fail . unwords $ ["Not zero length"]
+                when (r && not (hasPerm user groups fs 4)) $  fail . unwords $ ["Not readable"]
+                when (w && not (hasPerm user groups fs 2)) $  fail . unwords $ ["Not writable"]
+                when (x && not (hasPerm user groups fs 1)) $  fail . unwords $ ["Not executable"]
+      where
+        hasPerm user groups FileStatus{..} p = (fsOwner == user && (fsPermission .&. (p `shiftL` 6)) /= 0) ||
+                                               (fsGroup `elem` groups && (fsPermission .&. (p `shiftL` 3)) /= 0) ||
+                                               ((fsPermission .&. p) /= 0)
 
 subVersion :: SubCommand
 subVersion = SubCommand "version" "Show version information" go
