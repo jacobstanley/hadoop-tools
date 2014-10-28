@@ -120,8 +120,8 @@ workingDirConfigPath = unsafePerformIO $ do
     return (home `FilePath.combine` ".hhwd")
 {-# NOINLINE workingDirConfigPath #-}
 
-getDefaultWorkingDir :: MonadIO m => m HdfsPath
-getDefaultWorkingDir = liftIO $ (("/user" </>) . T.encodeUtf8 . hcUser) <$> getConfig
+getHomeDir :: MonadIO m => m HdfsPath
+getHomeDir = liftIO $ (("/user" </>) . T.encodeUtf8 . hcUser) <$> getConfig
 
 getWorkingDir :: MonadIO m => m HdfsPath
 getWorkingDir = liftIO $ handle onError
@@ -129,7 +129,7 @@ getWorkingDir = liftIO $ handle onError
                      <$> B.readFile workingDirConfigPath
   where
     onError :: SomeException -> IO HdfsPath
-    onError = const getDefaultWorkingDir
+    onError = const getHomeDir
 
 setWorkingDir :: MonadIO m => HdfsPath -> m ()
 setWorkingDir path = liftIO $ B.writeFile workingDirConfigPath
@@ -211,7 +211,7 @@ subChDir = SubCommand "cd" "Change working directory" go
   where
     go = cd <$> optional (argument bstr (completeDir <> help "the directory to change to"))
     cd mpath = SubHdfs $ do
-        path <- getAbsolute =<< maybe getDefaultWorkingDir return mpath
+        path <- getAbsolute =<< maybe getHomeDir return mpath
         _ <- getListingOrFail path
         setWorkingDir path
 
