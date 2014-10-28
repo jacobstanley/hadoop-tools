@@ -155,6 +155,9 @@ dropAbsParentDir (p : ps) = p : reverse (fst $ go [] ps)
     go xs       (y    : ys) = go (y : xs) ys
     go xs       []          = (xs, [])
 
+dropFileName :: HdfsPath -> HdfsPath
+dropFileName = B.pack . Posix.dropFileName . B.unpack
+
 ------------------------------------------------------------------------
 
 data SubCommand = SubCommand
@@ -302,10 +305,21 @@ subRemove = SubCommand "rm" "Delete a file or directory" go
   where
     go = rm <$> argument bstr (completePath <> help "the file/directory to remove")
             <*> switch        (short 'r' <> help "recursively remove the whole file hierarchy")
-    rm path recursive = SubHdfs $ do
+            <*> switch        (short 's' <> long "skipTrash" <> help "immediately delete, bypassing trash")
+    rm path recursive skipTrash = SubHdfs $ do
       absPath <- getAbsolute path
-      ok <- delete recursive absPath
-      unless ok $ liftIO . B.putStrLn $ "Failed to remove: " <> absPath
+      if skipTrash
+          then do
+              ok <- delete recursive absPath
+              unless ok $ liftIO . B.putStrLn $ "Failed to remove: " <> absPath
+          else do
+              home <- getHomeDir
+              let absDst = home </> ".Trash" </> "Current" <> absPath
+                  absDstDir = dropFileName absDst
+              ok <- mkdirs True absDstDir
+              unless ok $ liftIO . B.putStrLn $ "Failed to make trash folder: " <> absDstDir
+              rename True absPath absDst
+              liftIO . B.putStrLn . B.unwords $ ["Moved:", absPath, "to trash at:", absDst]
 
 subRename :: SubCommand
 subRename = SubCommand "mv" "Rename a file or directory" go
