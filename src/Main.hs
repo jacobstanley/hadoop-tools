@@ -158,6 +158,9 @@ dropAbsParentDir (p : ps) = p : reverse (fst $ go [] ps)
 dropFileName :: HdfsPath -> HdfsPath
 dropFileName = B.pack . Posix.dropFileName . B.unpack
 
+takeFileName :: HdfsPath -> HdfsPath
+takeFileName = B.pack . Posix.takeFileName . B.unpack
+
 ------------------------------------------------------------------------
 
 data SubCommand = SubCommand
@@ -330,7 +333,12 @@ subRename = SubCommand "mv" "Rename a file or directory" go
     mv src dst force = SubHdfs $ do
       absSrc <- getAbsolute src
       absDst <- getAbsolute dst
-      rename force absSrc absDst
+      mSrcType <- fmap fsFileType <$> getFileInfo absSrc
+      mDstType <- fmap fsFileType <$> getFileInfo absDst
+      let absDst' = if (mSrcType, mDstType) == (Just File, Just Dir)
+          then absDst </> takeFileName src
+          else absDst
+      rename force absSrc absDst'
 
 subTest :: SubCommand
 subTest = SubCommand "test" "If file exists, has zero length, is a directory then return 0, else return 1" go
