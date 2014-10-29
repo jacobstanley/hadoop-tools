@@ -311,7 +311,7 @@ subRemove = SubCommand "rm" "Delete a file or directory" go
             <*> switch        (short 's' <> long "skipTrash" <> help "immediately delete, bypassing trash")
     rm path recursive skipTrash = SubHdfs $ do
       absPath <- getAbsolute path
-      if skipTrash
+      if skipTrash || ".Trash" `elem` B.split '/' absPath
           then do
               ok <- delete recursive absPath
               unless ok $ liftIO . B.putStrLn $ "Failed to remove: " <> absPath
