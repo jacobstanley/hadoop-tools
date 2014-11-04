@@ -9,19 +9,18 @@ module Chmod (
 import           Control.Applicative
 import           Control.Monad (guard, msum)
 import qualified Data.Attoparsec.ByteString.Char8 as Atto
-import qualified Data.Attoparsec.Combinator as Atto
 import           Data.Bits
 import qualified Data.ByteString.Char8 as B
-import           Data.Char (ord)
+import           Data.Char (ord, isOctDigit)
 import           Data.List (foldl')
 import           Data.Maybe (mapMaybe)
-import           Data.Word (Word16, Word32)
+import           Data.Word (Word16)
 
 import           Data.Hadoop.Types (FileType(..))
 
 ------------------------------------------------------------------------
 
-data ChmodWho = Chmod_u | Chmod_g | Chmod_o | Chmod_a 
+data ChmodWho = Chmod_u | Chmod_g | Chmod_o | Chmod_a
     deriving (Show, Eq)
 data ChmodWhat = Chmod_r | Chmod_w | Chmod_x | Chmod_X
     | Chmod_s | Chmod_t
@@ -78,13 +77,12 @@ parseChmod = do
         ]
 
     octal :: Atto.Parser Word16
-    octal = B.foldl' step 0 `fmap` Atto.takeWhile1 isDig
+    octal = B.foldl' step 0 `fmap` Atto.takeWhile1 isOctDigit
       where
-        isDig w = w >= '0' && w <= '7'
         step a w = a * 8 + fromIntegral (ord w - 48)
 
 applyChmod :: FileType -> [Chmod] -> Word16 -> Word16
-applyChmod filetype cs old = foldl' f old cs
+applyChmod filetype = flip (foldl' f)
   where
     f :: Word16 -> Chmod -> Word16
     f _   (SetOctal new)        = new
@@ -96,8 +94,7 @@ applyChmod filetype cs old = foldl' f old cs
     f old (SetMinusWho who src) = minus who old (extract src old)
 
     set :: ChmodWho -> Word16 -> Word16 -> Word16
-    set who old new = (old .&. (complement (mask who))) .|.
-                      setWho who new
+    set who old new = (old .&. complement (mask who)) .|. setWho who new
 
     plus :: ChmodWho -> Word16 -> Word16 -> Word16
     plus who old new = old .|. setWho who new
@@ -115,7 +112,7 @@ applyChmod filetype cs old = foldl' f old cs
 
     setWho :: ChmodWho -> Word16 -> Word16
     setWho Chmod_a new = foldl' (.|.) 0 $
-        map (\w -> setWho w new) [Chmod_u, Chmod_g, Chmod_o]
+        map (`setWho` new) [Chmod_u, Chmod_g, Chmod_o]
     setWho who new = new `shiftL` s who
 
     extract :: ChmodWho -> Word16 -> Word16
@@ -139,4 +136,3 @@ applyChmod filetype cs old = foldl' f old cs
     s Chmod_u = 6
     s Chmod_g = 3
     s Chmod_o = 0
-

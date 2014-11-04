@@ -42,7 +42,7 @@ executable hh
   main-is: Main.hs
   hs-source-dirs: src
 
-  ghc-options: -funbox-strict-fields
+  ghc-options: -funbox-strict-fields -Wall
   ghc-prof-options: -auto-all -caf-all
 
   other-modules:

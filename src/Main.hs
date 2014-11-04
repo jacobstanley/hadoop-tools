@@ -4,7 +4,7 @@
 module Main (main) where
 
 import           Control.Concurrent.STM
-import           Control.Exception (SomeException, throwIO, bracket, fromException)
+import           Control.Exception (SomeException, throwIO, fromException)
 import           Control.Monad
 import           Control.Monad.Catch (handle, throwM)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
@@ -12,7 +12,6 @@ import qualified Data.Attoparsec.ByteString.Char8 as Atto
 import           Data.Bits ((.&.), shiftL, shiftR)
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as B
-import           Data.Char (ord)
 import           Data.Foldable (foldMap)
 import           Data.Maybe (fromMaybe)
 import qualified Data.Text as T
@@ -44,7 +43,7 @@ import           Network.Hadoop.Hdfs hiding (runHdfs)
 import           Network.Hadoop.Read
 
 import           Chmod
-import qualified Glob as Glob
+import qualified Glob
 
 import           Paths_hadoop_tools (version)
 
@@ -254,9 +253,9 @@ subDiskUsage = SubCommand "du" "Show the amount of space used by file or directo
 subFind :: SubCommand
 subFind = SubCommand "find" "Recursively search a directory tree" go
   where
-    go = find <$> (optional (argument bstr (completeDir <> help "the path to recursively search")))
-              <*> (optional (option bstr (long "name" <> metavar "FILENAME"
-                                                      <> help "the file name to match")))
+    go = find <$> optional (argument bstr (completeDir <> help "the path to recursively search"))
+              <*> optional (option bstr (long "name" <> metavar "FILENAME"
+                                                     <> help "the file name to match"))
     find mpath mexpr = SubHdfs $ do
         matcher <- liftIO (mkMatcher mexpr)
         printFindResults (fromMaybe "" mpath) matcher
@@ -276,9 +275,7 @@ subGet = SubCommand "get" "Get a file" go
       let dst = fromMaybe (Posix.takeFileName $ B.unpack src) mdst
       absSrc <- getAbsolute src
       mReadHandle <- openRead absSrc
-      let doRead readHandle = liftIO $ bracket
-              (openFile dst WriteMode)
-              (hClose)
+      let doRead readHandle = liftIO $ withFile dst WriteMode
               (\writeHandle -> hdfsMapM_ (B.hPut writeHandle) readHandle)
       maybe (return ()) doRead mReadHandle
 
@@ -393,10 +390,12 @@ testNewer path1 path2 older = SubHdfs $ do
     minfo1 <- getFileInfo absPath1
     minfo2 <- getFileInfo absPath2
     case (minfo1, minfo2, older) of
-        (Just fs1, Just fs2, False) -> do
-            when (fsModificationTime fs1 < fsModificationTime fs2) $ fail . unwords $ [B.unpack path1, "is older than", B.unpack path2]
-        (Just fs1, Just fs2, True) -> do
-            when (fsModificationTime fs1 > fsModificationTime fs2) $ fail . unwords $ [B.unpack path1, "is newer than", B.unpack path2]
+        (Just fs1, Just fs2, False) ->
+            when (fsModificationTime fs1 < fsModificationTime fs2) $
+                fail . unwords $ [B.unpack path1, "is older than", B.unpack path2]
+        (Just fs1, Just fs2, True) ->
+            when (fsModificationTime fs1 > fsModificationTime fs2) $
+                fail . unwords $ [B.unpack path1, "is newer than", B.unpack path2]
         _ -> fail $ unwords ["No such file/directory"]
 
 subVersion :: SubCommand
