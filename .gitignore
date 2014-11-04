@@ -1,1 +1,4 @@
 sample
+/.cabal-sandbox
+/dist
+/cabal.sandbox.config
