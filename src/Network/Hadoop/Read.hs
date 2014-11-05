@@ -15,9 +15,11 @@ module Network.Hadoop.Read
 
 import           Control.Applicative ((<$>))
 import           Control.Exception (SomeException, throwIO)
-import           Control.Monad (foldM)
+import           Control.Monad (foldM, when)
 import           Control.Monad.Catch (MonadMask, catch)
 import           Control.Monad.IO.Class (MonadIO(..))
+import           Control.Monad.Trans.State
+import           Control.Monad.Trans.Class (lift)
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as B
 import           Data.Maybe (fromMaybe)
@@ -76,11 +78,11 @@ hdfsFoldM :: (MonadIO m, MonadMask m) =>
     (a -> ByteString -> m a) -> a -> HdfsReadHandle -> m a
 hdfsFoldM f acc0 (HdfsReadHandle proxy l) = do
         let len = getField . lbFileLength $ l
-        foldM (procBlock f proxy len) acc0 (getField . lbBlocks $ l)
+        foldM (flip (execStateT . procBlock f proxy len)) acc0 (getField $ lbBlocks l)
 
 procBlock :: (MonadIO m, MonadMask m) =>
-    (a -> ByteString -> m a) -> Maybe SocksProxy -> Word64 -> a -> LocatedBlock -> m a
-procBlock f proxy blockSize acc0 block = do
+    (a -> ByteString -> m a) -> Maybe SocksProxy -> Word64 -> LocatedBlock -> StateT a m ()
+procBlock f proxy blockSize block = do
         let extended = getField . lbExtended $ block
             token = getField . lbToken $ block
         case getField . lbLocations $ block of
@@ -103,21 +105,21 @@ procBlock f proxy blockSize acc0 block = do
         let len = fromMaybe blockSize . getField . ebNumBytes $ extended
         S.bracketSocket proxy endpoint $ readBlock offset len extended token
 
-    readBlock offset0 len extended token sock = go 0 offset0 len acc0
+    readBlock offset0 len extended token sock = go 0 offset0 len
       where
-        go nread offset rem acc = do
-            (len', acc') <- readBlockPart offset rem extended token sock acc
+        go nread offset rem = do
+            len' <- readBlockPart offset rem extended token sock
             let offset' = offset + len'
                 nread' = nread + len'
                 rem' = rem - len'
-            if rem' > 0 then go nread' offset' rem' acc' else return acc'
+            when (rem' > 0) $ go nread' offset' rem'
 
-    readBlockPart offset rem extended token sock acc = do
+    readBlockPart offset rem extended token sock = do
         stream <- liftIO $ Stream.mkSocketStream sock
         b <- liftIO $ do
             Stream.runPut stream putReadRequest
             Stream.runGet stream decodeLengthPrefixedMessage
-        readPackets b rem stream acc
+        readPackets b rem stream
       where
 
         putReadRequest = do
@@ -143,17 +145,17 @@ procBlock f proxy blockSize acc0 block = do
 
     readPackets BlockOpResponse{..} len stream = go 0 len
       where
-        go nread rem acc = do
-            (len', acc') <- readPacket (b :: Maybe Integer) stream acc
+        go nread rem = do
+            len' <- readPacket (b :: Maybe Integer) stream
             let rem' = rem - len'
                 nread' = nread + len'
-            if rem' > 0 then go nread' rem' acc' else return (nread', acc')
+            if rem' > 0 then go nread' rem' else return nread'
 
         m = getField borReadOpChecksumInfo
         c = getField . rociChecksum <$> m
         b = fromIntegral . getField . csBytesPerChecksum <$> c
 
-    readPacket bytesPerChecksum stream acc = do
+    readPacket bytesPerChecksum stream = do
         (dataLen, d) <- liftIO $ do
             _len <- Stream.runGet stream Get.getWord32be
             sz <- Stream.runGet stream Get.getWord16be
@@ -165,9 +167,8 @@ procBlock f proxy blockSize acc0 block = do
             _ <- Stream.runGet stream (Get.getByteString (4*numChunks))
             (fromIntegral dataLen :: Integer,) <$>
                 Stream.runGet stream (Get.getByteString dataLen)
-
-        acc' <- f acc d
-        return (fromIntegral dataLen, acc')
+        get >>= \x -> lift (f x d) >>= put
+        return (fromIntegral dataLen)
       where
         countChunks :: PacketHeader -> Int
         countChunks PacketHeader{..} = (dataLen + b - 1) `div` b
