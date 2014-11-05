@@ -146,14 +146,14 @@ procBlock f proxy blockSize block = do
     readPackets BlockOpResponse{..} len stream = go 0 len
       where
         go nread rem = do
-            len' <- readPacket (b :: Maybe Integer) stream
+            len' <- readPacket (fromIntegral <$> b) stream
             let rem' = rem - len'
                 nread' = nread + len'
             if rem' > 0 then go nread' rem' else return nread'
 
         m = getField borReadOpChecksumInfo
         c = getField . rociChecksum <$> m
-        b = fromIntegral . getField . csBytesPerChecksum <$> c
+        b = getField . csBytesPerChecksum <$> c
 
     readPacket bytesPerChecksum stream = do
         (dataLen, d) <- liftIO $ do
@@ -162,18 +162,17 @@ procBlock f proxy blockSize block = do
             bs <- Stream.runGet stream $ Get.getByteString (fromIntegral sz)
             ph <- decodeBytes bs
             let numChunks = countChunks ph
-                dataLen = fromIntegral . getField . phDataLen $ ph
-
+                dataLen = getField $ phDataLen ph
             _ <- Stream.runGet stream (Get.getByteString (4*numChunks))
-            (fromIntegral dataLen :: Integer,) <$>
-                Stream.runGet stream (Get.getByteString dataLen)
+            (dataLen,) <$>
+                Stream.runGet stream (Get.getByteString (fromIntegral dataLen))
         get >>= \x -> lift (f x d) >>= put
         return (fromIntegral dataLen)
       where
         countChunks :: PacketHeader -> Int
         countChunks PacketHeader{..} = (dataLen + b - 1) `div` b
           where
-            b = fromIntegral $ fromMaybe 512 bytesPerChecksum
+            b = fromMaybe 512 bytesPerChecksum
             dataLen = fromIntegral $ getField phDataLen
 
     decodeBytes bs = case Get.runGetState decodeMessage bs 0 of
