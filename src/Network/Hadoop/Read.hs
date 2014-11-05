@@ -13,11 +13,12 @@ module Network.Hadoop.Read
     , hdfsCat
     ) where
 
-import           Control.Applicative ((<$>))
+import           Control.Applicative ((<$>), (<$))
 import           Control.Exception (SomeException, throwIO)
-import           Control.Monad (foldM, when)
+import           Control.Monad (foldM)
 import           Control.Monad.Catch (MonadMask, catch)
 import           Control.Monad.IO.Class (MonadIO(..))
+import           Control.Monad.Loops (iterateUntilM)
 import           Control.Monad.Trans.State
 import           Control.Monad.Trans.Class (lift)
 import           Data.ByteString (ByteString)
@@ -70,17 +71,17 @@ hdfsCat path = do
     maybe (return ()) (hdfsMapM_ (liftIO . B.putStr)) h
 
 -- | Map an action over the contents of a file on HDFS.
-hdfsMapM_ :: (MonadIO m, MonadMask m) =>
+hdfsMapM_ :: (Functor m, MonadIO m, MonadMask m) =>
     (ByteString -> m ()) -> HdfsReadHandle -> m ()
 hdfsMapM_ f = hdfsFoldM (\_ x -> f x) ()
 
-hdfsFoldM :: (MonadIO m, MonadMask m) =>
+hdfsFoldM :: (Functor m, MonadIO m, MonadMask m) =>
     (a -> ByteString -> m a) -> a -> HdfsReadHandle -> m a
 hdfsFoldM f acc0 (HdfsReadHandle proxy l) = do
         let len = getField . lbFileLength $ l
         foldM (flip (execStateT . procBlock f proxy len)) acc0 (getField $ lbBlocks l)
 
-procBlock :: (MonadIO m, MonadMask m) =>
+procBlock :: (Functor m, MonadIO m, MonadMask m) =>
     (a -> ByteString -> m a) -> Maybe SocksProxy -> Word64 -> LocatedBlock -> StateT a m ()
 procBlock f proxy blockSize block = do
         let extended = getField . lbExtended $ block
@@ -105,14 +106,11 @@ procBlock f proxy blockSize block = do
         let len = fromMaybe blockSize . getField . ebNumBytes $ extended
         S.bracketSocket proxy endpoint $ readBlock offset len extended token
 
-    readBlock offset0 len extended token sock = go 0 offset0 len
+    readBlock offset0 len extended token sock = () <$ go (0, offset0, len)
       where
-        go nread offset rem = do
+        go = iterateUntilM (\(_, _, rem) -> rem <= 0) $ \(nread, offset, rem) -> do
             len' <- readBlockPart offset rem extended token sock
-            let offset' = offset + len'
-                nread' = nread + len'
-                rem' = rem - len'
-            when (rem' > 0) $ go nread' offset' rem'
+            return (nread + len', offset + len', rem - len')
 
     readBlockPart offset rem extended token sock = do
         stream <- liftIO $ Stream.mkSocketStream sock
@@ -143,13 +141,11 @@ procBlock f proxy blockSize block = do
             , bhToken = putField (Just token)
             }
 
-    readPackets BlockOpResponse{..} len stream = go 0 len
+    readPackets BlockOpResponse{..} len stream = fst <$> go (0, len)
       where
-        go nread rem = do
+        go = iterateUntilM (\(_, rem) -> rem <= 0) $ \(nread, rem) -> do
             len' <- readPacket (fromIntegral <$> b) stream
-            let rem' = rem - len'
-                nread' = nread + len'
-            if rem' > 0 then go nread' rem' else return nread'
+            return (nread + len', rem - len')
 
         m = getField borReadOpChecksumInfo
         c = getField . rociChecksum <$> m

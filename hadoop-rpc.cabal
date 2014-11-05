@@ -51,6 +51,7 @@ library
     , cereal               >= 0.4
     , exceptions           >= 0.6
     , hashable             >= 1.2.1
+    , monad-loops          >= 0.4
     , network              >= 2.5
     , protobuf             >= 0.2.0.4
     , socks                >= 0.5
