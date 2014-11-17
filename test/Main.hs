@@ -4,13 +4,20 @@ module Main (main) where
 
 import Data.Hadoop.Types
 import Network.Hadoop.Hdfs
+import Test.Tasty (TestTree, defaultMain, testGroup)
+import Test.Tasty.HUnit (testCase)
 
 ------------------------------------------------------------------------
 
 main :: IO ()
-main = do
-    files <- runHdfs' config (getListing' "/")
-    print files
+main = defaultMain testTree
+
+testTree :: TestTree
+testTree = testGroup "Commands" [listing]
+  where
+    listing = testCase "Listing root" $ do
+        files <- runHdfs' config (getListing' "/")
+        print files
 
 config :: HadoopConfig
 config = HadoopConfig {
