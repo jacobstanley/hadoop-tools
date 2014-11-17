@@ -14,7 +14,7 @@ module Network.Hadoop.Read
     ) where
 
 import           Control.Applicative ((<$>), (<$))
-import           Control.Exception (SomeException, throwIO)
+import           Control.Exception (IOException, throwIO)
 import           Control.Monad (foldM)
 import           Control.Monad.Catch (MonadMask, catch)
 import           Control.Monad.IO.Class (MonadIO(..))
@@ -41,6 +41,7 @@ import           Network.Hadoop.Hdfs
 import           Network.Hadoop.Rpc
 import qualified Network.Hadoop.Socket as S
 import qualified Network.Hadoop.Stream as Stream
+import           Text.Printf (printf)
 
 import           Prelude hiding (rem)
 
@@ -88,12 +89,13 @@ procBlock f proxy blockSize block = do
             token = getField . lbToken $ block
         case getField . lbLocations $ block of
             [] -> error $ "No locations for block " ++ show extended
-            ls -> failover (error $ "All locations failed for block " ++ show extended)
-                           (map (getLoc extended token) ls)
+            ls -> failover [] ls (getLoc extended token) $ \es ->
+                      error $ printf "All locations failed for block %s:\n%s"
+                                  (show es) (show extended)
   where
-    failover err [] = err
-    failover err (x:xs) = catch x handler
-      where handler (_ :: SomeException) = failover err xs
+    failover es     []  _ err = err es
+    failover es (x:xs) fn err = catch (fn x) handler
+      where handler (e :: IOException) = failover ((e,x):es) xs fn err
 
     getLoc extended token l = do
         let i = getField (dnId l)
