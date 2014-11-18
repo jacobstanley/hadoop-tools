@@ -132,8 +132,7 @@ getListingRecursive' :: Connection
                      -> TBQueue (Maybe (HdfsPath, Either SomeException (V.Vector FileStatus)))
                      -> HdfsPath
                      -> IO ()
-getListingRecursive' conn outstanding queue rootPath = do
-    getInitial rootPath
+getListingRecursive' conn outstanding queue = getInitial
   where
     getInitial path = getPartial path B.empty
 
@@ -264,7 +263,7 @@ setPermissions :: Word32 -> HdfsPath -> Hdfs ()
 setPermissions mode path = ignore <$>
     hdfsInvoke "setPermission" P.SetPermissionRequest
     { P.chmodPath = putField (T.decodeUtf8 path)
-    , P.chmodMode = putField $ P.FilePermission { fpPerm = putField mode }
+    , P.chmodMode = putField P.FilePermission{ fpPerm = putField mode }
     }
   where
     ignore :: P.SetPermissionResponse -> ()

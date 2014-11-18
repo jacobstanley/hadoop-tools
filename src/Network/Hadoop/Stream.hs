@@ -45,7 +45,7 @@ data StreamState
 -- | Lightweight abstraction over an input/output stream.
 data Stream = Stream
     { streamIn    :: IO (Maybe B.ByteString)
-    , streamOut   :: (Maybe L.ByteString -> IO ())
+    , streamOut   :: Maybe L.ByteString -> IO ()
     , streamState :: !(IORef StreamState)
     }
 
