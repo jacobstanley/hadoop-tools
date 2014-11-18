@@ -63,11 +63,19 @@ library
     , vector               >= 0.10
     , xmlhtml              >= 0.2
 
-test-suite hurtle-test
-  type:        exitcode-stdio-1.0
+flag travis
+  description: Travis CI can't run some tests that depend on HDFS being present,
+               so this flag disables those.
+  default: False
+
+test-suite hdfs-tests
+  type: exitcode-stdio-1.0
   main-is: Main.hs
   hs-source-dirs: test
   default-language: Haskell2010
+
+  if flag(travis)
+    buildable: False
 
   build-depends:
       base >= 4.7 && < 5
