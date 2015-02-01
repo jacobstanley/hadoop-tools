@@ -4,6 +4,7 @@
 module Data.Hadoop.Protobuf.Headers where
 
 import Data.ByteString (ByteString)
+import Data.Int (Int32)
 import Data.ProtocolBuffers
 import Data.ProtocolBuffers.Orphans ()
 import Data.Text (Text)
@@ -52,29 +53,42 @@ data RpcOperation = FinalPacket        -- ^ The final RPC packet
 data RpcRequestHeader = RpcRequestHeader
     { reqKind       :: Optional 1 (Enumeration RpcKind)
     , reqOp         :: Optional 2 (Enumeration RpcOperation)
-    , reqCallId     :: Required 3 (Value Word32)     -- ^ A sequence number that is sent back in the response
-
-    -- Fields below don't apply until v9
-    --, reqClientId   :: Required 4 (Value ByteString) -- ^ Globally unique client ID
-    --, reqRetryCount :: Optional 5 (Value Int32)      -- ^ Retry count, 1 means this is the first retry
+    , reqCallId     :: Required 3 (Value (Signed Int32)) -- ^ Sequence number that is sent back in response
+    , reqClientId   :: Required 4 (Value ByteString)     -- ^ Globally unique client ID
+    , reqRetryCount :: Optional 5 (Value (Signed Int32)) -- ^ Retry count, 1 means this is the first retry
     } deriving (Generic, Show)
 
 instance Encode RpcRequestHeader
 instance Decode RpcRequestHeader
 
--- | This message is used for Protobuf RPC Engine.
--- The message is used to marshal a RPC request from RPC client to the
--- RPC server. The response to the RPC call (including errors) are handled
--- as part of the standard RPC response.
-data RpcRequest = RpcRequest
-    { reqMethodName      :: Required 1 (Value Text)       -- ^ Name of the RPC method
-    , reqBytes           :: Optional 2 (Value ByteString) -- ^ Bytes corresponding to the client protobuf request
-    , reqProtocolName    :: Required 3 (Value Text)       -- ^ Protocol name of class declaring the called method
-    , reqProtocolVersion :: Required 4 (Value Word64)     -- ^ Protocol version of class declaring the called method
-    } deriving (Generic, Show)
+-- | This message is the header for the Protobuf Rpc Engine
+-- when sending a RPC request from  RPC client to the RPC server.
+-- The actual request (serialized as protobuf) follows this request.
+--
+-- No special header is needed for the Rpc Response for Protobuf Rpc Engine.
+-- The normal RPC response header (see RpcHeader.proto) are sufficient.
+data RequestHeader = RequestHeader {
+  -- | Name of the RPC method
+    reqMethodName :: Required 1 (Value Text)
 
-instance Encode RpcRequest
-instance Decode RpcRequest
+  -- | RPCs for a particular interface (ie protocol) are done using an IPC
+  -- connection that is setup using rpcProxy.  The rpcProxy has a declared
+  -- protocol name that is sent from client to server at connection time.
+  --
+  -- Each Rpc call also sends a protocol name (reqProtocolName). This name is
+  -- usually the same as the connection protocol name, but not always. For example,
+  -- meta protocols, such as ProtocolInfoProto, reuse the connection but need to
+  -- indicate that the actual protocol is different (i.e. the protocol is
+  -- ProtocolInfoProto) since they reuse the connection; in this case the
+  -- protocol name is set to ProtocolInfoProto.
+  , reqProtocolName :: Required 2 (Value Text)
+
+  -- | Protocol version of class declaring the called method.
+  , reqProtocolVersion :: Required 3 (Value Word64)
+} deriving (Generic, Show)
+
+instance Encode RequestHeader
+instance Decode RequestHeader
 
 ------------------------------------------------------------------------
 
@@ -88,52 +102,39 @@ data RpcStatus = Success -- ^ Succeeded
 -- | Note that RPC response header is also used when connection setup fails.
 -- (i.e. the response looks like an RPC response with a fake callId)
 --
--- For v7:
---  - If successfull then the Respose follows after this header
---      - length (4 byte int), followed by the response
---  - If error or fatal - the exception info follow
---      - length (4 byte int) Class name of exception - UTF-8 string
---      - length (4 byte int) Stacktrace - UTF-8 string
---      - if the strings are null then the length is -1
---
 --  In case of Fatal error then the respose contains the Serverside's IPC version.
 
 data RpcResponseHeader = RpcResponseHeader
     { rspCallId             :: Required 1 (Value Word32)          -- ^ Call ID used in request
     , rspStatus             :: Required 2 (Enumeration RpcStatus)
     , rspServerIpcVersion   :: Optional 3 (Value Word32)          -- ^ v7: Sent if fatal v9: Sent if success or fail
-
-    -- Fields below don't apply until v9
-    --, rspExceptionClassName :: Optional 4 (Value Text)            -- ^ If the request fails
-    --, rspErrorMsg           :: Optional 5 (Value Text)            -- ^ If the request fails, often contains stack trace
-    --, rspErrorDetail        :: Optional 6 (Enumeration Error)  -- ^ In case of error
-    --, rspClientId           :: Optional 7 (Value ByteString)      -- ^ Globally unique client ID
-    --, rspRetryCount         :: Optional 8 (Value Int32)
+    , rspExceptionClassName :: Optional 4 (Value Text)            -- ^ If the request fails
+    , rspErrorMsg           :: Optional 5 (Value Text)            -- ^ If the request fails, often contains stack trace
+    , rspErrorDetail        :: Optional 6 (Enumeration Error)     -- ^ In case of error
+    , rspClientId           :: Optional 7 (Value ByteString)      -- ^ Globally unique client ID
+    , rspRetryCount         :: Optional 8 (Value Int32)
     } deriving (Generic, Show)
 
 instance Encode RpcResponseHeader
 instance Decode RpcResponseHeader
 
-{-
--- Error doesn't apply until v9
-
 -- | Describes why an RPC error occurred.
 data Error = ErrorApplication         -- ^ RPC failed - RPC app threw exception
-              | ErrorNoSuchMethod        -- ^ RPC error - no such method
-              | ErrorNoSuchProtocol      -- ^ RPC error - no such protocol
-              | ErrorRpcServer           -- ^ RPC error on server side
-              | ErrorSerializingResponse -- ^ Error serializing response
-              | ErrorRpcVersionMismatch  -- ^ RPC protocol version mismatch
-              | ErrorCode Int            -- ^ RPC error that we don't know about
+           | ErrorNoSuchMethod        -- ^ RPC error - no such method
+           | ErrorNoSuchProtocol      -- ^ RPC error - no such protocol
+           | ErrorRpcServer           -- ^ RPC error on server side
+           | ErrorSerializingResponse -- ^ Error serializing response
+           | ErrorRpcVersionMismatch  -- ^ RPC protocol version mismatch
+           | ErrorCode Int            -- ^ RPC error that we don't know about
 
-                -- starts at 10
-              | FatalUnknown                  -- ^ Unknown fatal error
-              | FatalUnsupportedSerialization -- ^ IPC layer serilization type invalid
-              | FatalInvalidRpcHeader         -- ^ Fields of RPC header are invalid
-              | FatalDeserializingRequest     -- ^ Could not deserialize RPC request
-              | FatalVersionMismatch          -- ^ IPC layer version mismatch
-              | FatalUnauthorized             -- ^ Auth failed
-              | FatalCode Int                 -- ^ Fatal error that we don't know about
+             -- starts at 10
+           | FatalUnknown                  -- ^ Unknown fatal error
+           | FatalUnsupportedSerialization -- ^ IPC layer serilization type invalid
+           | FatalInvalidRpcHeader         -- ^ Fields of RPC header are invalid
+           | FatalDeserializingRequest     -- ^ Could not deserialize RPC request
+           | FatalVersionMismatch          -- ^ IPC layer version mismatch
+           | FatalUnauthorized             -- ^ Auth failed
+           | FatalCode Int                 -- ^ Fatal error that we don't know about
   deriving (Generic, Show)
 
 instance Enum Error where
@@ -167,4 +168,3 @@ instance Enum Error where
       FatalVersionMismatch          -> 14
       FatalUnauthorized             -> 15
       FatalCode n                   -> n
--}

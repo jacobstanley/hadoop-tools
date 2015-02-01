@@ -9,25 +9,27 @@ module Network.Hadoop.Rpc
     , RawRequest
     , RawResponse
 
-    , initConnectionV7
+    , initConnectionV9
     , invokeAsync
     , invoke
     ) where
 
-import           Control.Applicative ((<$>), (<*>))
+import           Control.Applicative ((<$>))
 import           Control.Concurrent (ThreadId, forkIO, newEmptyMVar, putMVar, takeMVar)
 import           Control.Concurrent.STM
 import           Control.Exception (SomeException(..), throwIO, handle)
 import           Control.Monad (forever, when)
 import           Data.ByteString (ByteString)
-import qualified Data.ByteString.Char8 as B
+import qualified Data.ByteString.Lazy as L
 import qualified Data.HashMap.Strict as H
 import           Data.Hashable (Hashable)
 import           Data.Maybe (fromMaybe, isNothing)
+import           Data.Monoid ((<>))
 import           Data.Monoid (mempty)
 import           Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
+import qualified Data.UUID as UUID
+import           System.Random (randomIO)
 
 import           Data.ProtocolBuffers
 import           Data.ProtocolBuffers.Orphans ()
@@ -42,10 +44,10 @@ import           Network.Socket (Socket)
 ------------------------------------------------------------------------
 
 data Connection = Connection
-    { cnVersion    :: !Int
-    , cnConfig     :: !HadoopConfig
-    , cnProtocol   :: !Protocol
-    , invokeRaw    :: !(Method -> RawRequest -> (RawResponse -> IO ()) -> IO ())
+    { cnVersion  :: !Int
+    , cnConfig   :: !HadoopConfig
+    , cnProtocol :: !Protocol
+    , invokeRaw  :: !(Method -> RawRequest -> (RawResponse -> IO ()) -> IO ())
     }
 
 data Protocol = Protocol
@@ -59,6 +61,8 @@ type RawResponse = Either SomeException ByteString
 
 type CallId = Int
 
+newtype ClientId = ClientId { unClientId :: ByteString }
+
 ------------------------------------------------------------------------
 
 -- hadoop-2.1.0-beta is on version 9
@@ -66,25 +70,25 @@ type CallId = Int
 
 data ConnectionState = ConnectionState
     { csStream        :: !S.Stream
+    , csClientId      :: !ClientId
     , csCallId        :: !(TVar CallId)
     , csRecvCallbacks :: !(TVar (H.HashMap CallId (RawResponse -> IO ())))
     , csSendQueue     :: !(TQueue (Method, RawRequest, RawResponse -> IO ()))
     , csFatalError    :: !(TVar (Maybe SomeException))
     }
 
-initConnectionV7 :: HadoopConfig -> Protocol -> Socket -> IO Connection
-initConnectionV7 config@HadoopConfig{..} protocol sock = do
-    csStream <- S.mkSocketStream sock
+initConnectionV9 :: HadoopConfig -> Protocol -> Socket -> IO Connection
+initConnectionV9 config@HadoopConfig{..} protocol sock = do
+    csStream   <- S.mkSocketStream sock
+    csClientId <- mkClientId
 
     S.runPut csStream $ do
         putByteString "hrpc"
-        putWord8 7  -- version
-        putWord8 80 -- auth method (80 = simple, 81 = kerberos/gssapi, 82 = token/digest-md5)
-        putWord8 0  -- ipc serialization type (0 = protobuf)
-
-        let bs = runPut (encodeMessage (contextProto protocol hcUser))
-        putWord32be (fromIntegral (B.length bs))
-        putByteString bs
+        putWord8 9  -- version
+        putWord8 0 -- rpc service class (0 = default/protobuf, 1 = built-in, 2 = writable, 3 = protobuf
+        putWord8 0 -- auth protocol (0 = none, -33/0xDF = sasl)
+        putMessage $ delimitedBytesL (rpcRequestHeaderProto csClientId (-3))
+                  <> delimitedBytesL (contextProto protocol hcUser)
 
     csCallId        <- newTVarIO 0
     csRecvCallbacks <- newTVarIO H.empty
@@ -121,24 +125,35 @@ initConnectionV7 config@HadoopConfig{..} protocol sock = do
             modifyTVar' csCallId succ
             modifyTVar' csRecvCallbacks (H.insert callId k)
 
-            return $ runPut $ encodeLengthPrefixedMessage (requestHeaderProto callId)
-                           >> encodeLengthPrefixedMessage (requestProto protocol method requestBytes)
+            return $ delimitedBytesL (rpcRequestHeaderProto csClientId callId)
+                  <> delimitedBytesL (requestHeaderProto protocol method)
+                  <> L.fromStrict requestBytes
 
-        S.runPut csStream $ do
-            putWord32be (fromIntegral (B.length bs))
-            putByteString bs
+        S.runPut csStream (putMessage bs)
 
     forkRecv :: ConnectionState -> IO ThreadId
     forkRecv cs@ConnectionState{..} = forkIO $ handle (onSocketError cs) $ forever $ do
-        hdr <- S.maybeGet csStream decodeLengthPrefixedMessage
-        case hdr of
-          Nothing     -> throwIO ConnectionClosed
-          Just rspHdr -> do
+        mget <- S.maybeGet csStream $ do
+            n <- fromIntegral <$> getWord32be
+            -- TODO Would be nice if we didn't have to isolate here
+            -- TODO and could stream instead. We could stream if we
+            -- TODO were able to read the varint length prefix
+            -- TODO ourselves and keep track of how many bytes were
+            -- TODO remaining instead of calling `getRemaining`.
+            isolate n $ do
+                hdr <- decodeLengthPrefixedMessage
+                msg <- case getField (P.rspStatus hdr) of
+                    P.Success -> Right <$> getRemaining
+                    _         -> return . Left . SomeException $ rspError hdr
+                return (hdr, msg)
+
+        case mget of
+          Nothing -> throwIO ConnectionClosed
+          Just (hdr, msg) -> do
             onResponse <- fromMaybe (return $ return ())
-                      <$> lookupDelete csRecvCallbacks (fromIntegral $ getField $ P.rspCallId rspHdr)
-            case getField (P.rspStatus rspHdr) of
-              P.Success -> S.runGet csStream getResponse >>= onResponse . Right
-              _         -> S.runGet csStream getError    >>= onResponse . Left . SomeException
+                      <$> lookupDelete csRecvCallbacks (fromIntegral $ getField $ P.rspCallId hdr)
+
+            onResponse msg
 
     onSocketError :: ConnectionState -> SomeException -> IO ()
     onSocketError ConnectionState{..} ex = do
@@ -152,6 +167,9 @@ initConnectionV7 config@HadoopConfig{..} protocol sock = do
 
     ignore :: SomeException -> IO ()
     ignore _ = return ()
+
+mkClientId :: IO ClientId
+mkClientId = ClientId . L.toStrict . UUID.toByteString <$> randomIO
 
 unfoldM :: Monad m => m (Maybe a) -> m [a]
 unfoldM f = go []
@@ -179,32 +197,35 @@ contextProto protocol user = P.IpcConnectionContext
         })
     }
 
-requestHeaderProto :: CallId -> P.RpcRequestHeader
-requestHeaderProto callId = P.RpcRequestHeader
+rpcRequestHeaderProto :: ClientId -> CallId -> P.RpcRequestHeader
+rpcRequestHeaderProto clientId callId = P.RpcRequestHeader
     { P.reqKind       = putField (Just P.ProtocolBuffer)
     , P.reqOp         = putField (Just P.FinalPacket)
     , P.reqCallId     = putField (fromIntegral callId)
+    , P.reqClientId   = putField (unClientId clientId)
+    , P.reqRetryCount = putField (Just (-1))
     }
 
-requestProto :: Protocol -> Method -> ByteString -> P.RpcRequest
-requestProto protocol method bytes = P.RpcRequest
+requestHeaderProto :: Protocol -> Method -> P.RequestHeader
+requestHeaderProto protocol method = P.RequestHeader
     { P.reqMethodName      = putField method
-    , P.reqBytes           = putField (Just bytes)
     , P.reqProtocolName    = putField (prName protocol)
     , P.reqProtocolVersion = putField (fromIntegral (prVersion protocol))
     }
 
-getResponse :: Get ByteString
-getResponse = do
-    n <- fromIntegral <$> getWord32be
-    getByteString n
+rspError :: P.RpcResponseHeader -> RemoteError
+rspError rsp = RemoteError (fromMaybe "unknown error" $ getField $ P.rspExceptionClassName rsp)
+                           (fromMaybe "unknown error" $ getField $ P.rspErrorMsg rsp)
 
-getError :: Get RemoteError
-getError = RemoteError <$> getText <*> getText
-  where
-    getText = do
-        n <- fromIntegral <$> getWord32be
-        T.decodeUtf8 <$> getByteString n
+putMessage :: L.ByteString -> Put
+putMessage body = do
+    putWord32be (fromIntegral (L.length body))
+    putLazyByteString body
+
+getRemaining :: Get ByteString
+getRemaining = do
+    n <- remaining
+    getByteString n
 
 ------------------------------------------------------------------------
 
@@ -218,16 +239,19 @@ invoke connection method arg = do
       Right x -> return x
 
 invokeAsync :: (Decode b, Encode a) => Connection -> Text -> a -> (Either SomeException b -> IO ()) -> IO ()
-invokeAsync Connection{..} method arg k = invokeRaw method (encodeBytes arg) k'
+invokeAsync Connection{..} method arg k = invokeRaw method (delimitedBytes arg) k'
   where
     k' (Left err) = k (Left err)
-    k' (Right bs) = k (decodeBytes bs)
+    k' (Right bs) = k (fromDelimitedBytes bs)
 
-encodeBytes :: Encode a => a -> ByteString
-encodeBytes = runPut . encodeMessage
+delimitedBytes :: Encode a => a -> ByteString
+delimitedBytes = runPut . encodeLengthPrefixedMessage
 
-decodeBytes :: Decode a => ByteString -> Either SomeException a
-decodeBytes bs = case runGetState decodeMessage bs 0 of
+delimitedBytesL :: Encode a => a -> L.ByteString
+delimitedBytesL = L.fromStrict . delimitedBytes
+
+fromDelimitedBytes :: Decode a => ByteString -> Either SomeException a
+fromDelimitedBytes bs = case runGetState decodeLengthPrefixedMessage bs 0 of
     Left err      -> decodeError (T.pack err)
     Right (x, "") -> Right x
     Right (_, _)  -> decodeError "decoded response but did not consume enough bytes"
