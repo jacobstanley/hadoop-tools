@@ -1,0 +1,4 @@
+.git/
+.cabal-sandbox/
+dist/
+cabal.sandbox.config
