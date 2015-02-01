@@ -1,5 +1,5 @@
 name:          hadoop-tools
-version:       0.5
+version:       0.6
 
 synopsis:
   Fast command line tools for working with Hadoop.
@@ -7,9 +7,11 @@ synopsis:
 description:
   hh - Blazing fast interaction with HDFS
   .
-  Currently we only support v7 of the RPC protocol (< CDH5).
+  If built against hadoop-rpc-1.x.x.x then these tools support v9 of the
+  Hadoop RPC protocol (CDH 5.x and above).
   .
-  Support for v9 (>= CDH5) is coming soon.
+  Earlier versions (< 0.6) can be installed using
+  --constraint=hadoop-rpc==0.1.1.1 if you need v7 support.
   .
   > hh cat     - Print the contents of a file to stdout
   > hh cd      - Change working directory
@@ -58,7 +60,7 @@ executable hh
     , configurator         >= 0.3
     , exceptions           >= 0.6
     , filepath             >= 1.3
-    , hadoop-rpc           >= 0.1.1.1
+    , hadoop-rpc           >= 1.0.0.1
     , old-locale           >= 1.0
     , optparse-applicative >= 0.11
     , protobuf             >= 0.2.0.4
