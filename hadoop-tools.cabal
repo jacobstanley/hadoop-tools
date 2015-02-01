@@ -7,11 +7,10 @@ synopsis:
 description:
   hh - Blazing fast interaction with HDFS
   .
-  If built against hadoop-rpc-1.x.x.x then these tools support v9 of the
-  Hadoop RPC protocol (CDH 5.x and above).
+  These tools support v9 of the Hadoop RPC protocol (CDH 5.x and above).
   .
-  Earlier versions (< 0.6) can be installed using
-  --constraint=hadoop-rpc==0.1.1.1 if you need v7 support.
+  Earlier versions (< 0.6) can be installed using --constraint=hadoop-rpc==0.1.1.1
+  if you need v7 support.
   .
   > hh cat     - Print the contents of a file to stdout
   > hh cd      - Change working directory
