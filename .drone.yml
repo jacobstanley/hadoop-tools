@@ -1,0 +1,7 @@
+image: jystic/centos6-ghc7.8.4
+script:
+  - cabal update
+  - cabal install --only-dependencies --enable-tests
+  - cabal configure --enable-tests
+  - cabal build
+  - cabal test
