@@ -1,0 +1,15 @@
+machine:
+  services:
+    - docker
+
+dependencies:
+  override:
+    - docker pull jystic/centos6-ghc7.8.4
+
+test:
+  override:
+    - ./build-centos6.sh
+
+general:
+  artifacts:
+    - dist/centos6
