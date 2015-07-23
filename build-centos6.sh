@@ -1,4 +1,4 @@
-#!/bin/sh -e
+#!/bin/bash -ex
 
 OUTPUT=$PWD/dist/centos6
 DOCKER_TAG=hadoop-tools
@@ -11,4 +11,9 @@ mkdir -p $OUTPUT
 docker run \
     -v $OUTPUT:/dist:rw \
     -t $DOCKER_TAG \
-    cp /root/.cabal/bin/hh /dist/
+    sh -c "cp /root/.cabal/bin/hh /dist/"
+
+docker run \
+    -v $OUTPUT:/dist:rw \
+    -t $DOCKER_TAG \
+    sh -c "cp /root/rpmbuild/RPMS/x86_64/* /dist/"

@@ -1,21 +1,39 @@
 FROM jystic/centos6-ghc7.8.4
 
+# Dependencies
+RUN yum install -y epel-release rpmdevtools tar
+
 # Update cabal
 RUN cabal update
 
 # Add .cabal file
-ADD ./hadoop-tools.cabal /opt/hadoop-tools/hadoop-tools.cabal
+ADD ./hadoop-tools.cabal /src/hadoop-tools/hadoop-tools.cabal
 
 # Docker will cache this command as a layer, freeing us up to
 # modify source code without re-installing dependencies
-RUN cd /opt/hadoop-tools && cabal install --only-dependencies -j4
+RUN cd /src/hadoop-tools && cabal install --only-dependencies -j4
 
 # Add and install application code
-ADD . /opt/hadoop-tools
-RUN cd /opt/hadoop-tools && cabal install
+ADD . /src/hadoop-tools
+RUN cd /src/hadoop-tools && cabal install
 
-# Add installed cabal executables to PATH
-ENV PATH /root/.cabal/bin:$PATH
+# Create RPM Tree
+RUN rpmdev-setuptree
+
+# Bundle "sources" in to a tarball
+WORKDIR /root/rpmbuild
+RUN mkdir -p hadoop-tools-0.6/usr/bin/
+RUN mkdir -p hadoop-tools-0.6/etc/bash_completion.d/
+RUN install -m 755 /root/.cabal/bin/hh                  hadoop-tools-0.6/usr/bin/
+RUN install -m 755 /src/hadoop-tools/hh-completion.bash hadoop-tools-0.6/etc/bash_completion.d/
+RUN tar -zcvf SOURCES/hadoop-tools-0.6.tar.gz           hadoop-tools-0.6/
+
+# Build RPM
+RUN cp /src/hadoop-tools/hadoop-tools.spec SPECS/
+RUN rpmbuild -ba                           SPECS/hadoop-tools.spec
+
+# Install RPM
+RUN yum install -y RPMS/x86_64/*.rpm
 
 # Default Command for Container
 CMD ["hh"]
