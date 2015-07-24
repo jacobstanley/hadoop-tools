@@ -3,3 +3,7 @@
 Tools for working with Hadoop written with performance in mind.
 
 *This has been tested with the HDFS protocol used by CDH 5.x*
+
+## Where can I get it?
+
+See our latest release [v0.7](https://github.com/jystic/hadoop-tools/releases/tag/v0.7)!
