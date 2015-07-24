@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Main (main) where
 
@@ -52,16 +53,31 @@ main = do
     cmd <- execParser optsParser
     case cmd of
       SubIO   io   -> io
-      SubHdfs hdfs -> handle exitError (runHdfs hdfs)
+      SubHdfs hdfs -> runHdfs hdfs
   where
     optsParser = info (helper <*> options)
                       (fullDesc <> header "hh - Blazing fast interaction with HDFS")
+
+runHdfs :: forall a. Hdfs a -> IO a
+runHdfs hdfs = handle exitError $ do
+    config <- getConfig
+    run config
+  where
+    exitError :: RemoteError -> IO a
     exitError err = printError err >> exitFailure
 
-runHdfs :: Hdfs a -> IO a
-runHdfs hdfs = do
-    config <- getConfig
-    runHdfs' config hdfs
+    run :: HadoopConfig -> IO a
+    run cfg = handle (runAgain cfg) (print cfg >> runHdfs' cfg hdfs)
+
+    runAgain :: HadoopConfig -> RemoteError -> IO a
+    runAgain cfg e | isStandbyError e = maybe (throwM e) run (dropNameNode cfg)
+                   | otherwise        = throwM e
+
+    dropNameNode :: HadoopConfig -> Maybe HadoopConfig
+    dropNameNode cfg | null ns   = Nothing
+                     | otherwise = Just (cfg { hcNameNodes = ns })
+      where
+        ns = drop 1 (hcNameNodes cfg)
 
 getConfig :: IO HadoopConfig
 getConfig = do
@@ -560,6 +576,9 @@ printError (RemoteError subject body)
 
 isAccessDenied :: RemoteError -> Bool
 isAccessDenied (RemoteError s _) = s == "org.apache.hadoop.security.AccessControlException"
+
+isStandbyError :: RemoteError -> Bool
+isStandbyError (RemoteError s _) = s == "org.apache.hadoop.ipc.StandbyException"
 
 ------------------------------------------------------------------------
 
