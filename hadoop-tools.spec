@@ -8,7 +8,7 @@
 Summary: Tools for working with Hadoop written with performance in mind.
 Name: hadoop-tools
 Version: 0.7
-Release: 1
+Release: 2
 License: BSD
 Group: Development/Tools
 Requires: gmp bash-completion
@@ -41,6 +41,8 @@ BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
 %{_bindir}/hh
 
 %changelog
+* Fri Jul 24 2015 Jacob Stanley <jacob@stanley.io> 0.7-2
+- Fixed bug where find didn't work with automatic switchover
 * Fri Jul 24 2015 Jacob Stanley <jacob@stanley.io> 0.7-1
 - Support for automatic namenode switching
 * Thu Jul 23 2015 Jacob Stanley <jacob@stanley.io> 0.6-1
