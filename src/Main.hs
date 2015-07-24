@@ -271,6 +271,7 @@ subFind = SubCommand "find" "Recursively search a directory tree" go
               <*> optional (option bstr (long "name" <> metavar "FILENAME"
                                                      <> help "the file name to match"))
     find mpath mexpr = SubHdfs $ do
+        _ <- getFileInfo "/"
         matcher <- liftIO (mkMatcher mexpr)
         printFindResults (fromMaybe "" mpath) matcher
 
