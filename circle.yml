@@ -4,7 +4,7 @@ machine:
 
 dependencies:
   override:
-    - docker pull jystic/centos6-ghc7.8.4
+    - docker pull jystic/centos6-ghc7.10.1
 
 test:
   override:
