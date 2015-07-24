@@ -22,11 +22,11 @@ RUN rpmdev-setuptree
 
 # Bundle "sources" in to a tarball
 WORKDIR /root/rpmbuild
-RUN mkdir -p hadoop-tools-0.6/usr/bin/
-RUN mkdir -p hadoop-tools-0.6/etc/bash_completion.d/
-RUN install -m 755 /root/.cabal/bin/hh                  hadoop-tools-0.6/usr/bin/
-RUN install -m 755 /src/hadoop-tools/hh-completion.bash hadoop-tools-0.6/etc/bash_completion.d/
-RUN tar -zcvf SOURCES/hadoop-tools-0.6.tar.gz           hadoop-tools-0.6/
+RUN mkdir -p hadoop-tools-0.7/usr/bin/
+RUN mkdir -p hadoop-tools-0.7/etc/bash_completion.d/
+RUN install -m 755 /root/.cabal/bin/hh                  hadoop-tools-0.7/usr/bin/
+RUN install -m 755 /src/hadoop-tools/hh-completion.bash hadoop-tools-0.7/etc/bash_completion.d/
+RUN tar -zcvf SOURCES/hadoop-tools-0.7.tar.gz           hadoop-tools-0.7/
 
 # Build RPM
 RUN cp /src/hadoop-tools/hadoop-tools.spec SPECS/

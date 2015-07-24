@@ -7,7 +7,7 @@
 
 Summary: Tools for working with Hadoop written with performance in mind.
 Name: hadoop-tools
-Version: 0.6
+Version: 0.7
 Release: 1
 License: BSD
 Group: Development/Tools
@@ -41,5 +41,7 @@ BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
 %{_bindir}/hh
 
 %changelog
+* Fri Jul 24 2015 Jacob Stanley <jacob@stanley.io> 0.7-1
+- Support for automatic namenode switching
 * Thu Jul 23 2015 Jacob Stanley <jacob@stanley.io> 0.6-1
 - Packaged as RPM
