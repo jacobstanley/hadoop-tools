@@ -67,7 +67,7 @@ runHdfs hdfs = handle exitError $ do
     exitError err = printError err >> exitFailure
 
     run :: HadoopConfig -> IO a
-    run cfg = handle (runAgain cfg) (print cfg >> runHdfs' cfg hdfs)
+    run cfg = handle (runAgain cfg) (runHdfs' cfg hdfs)
 
     runAgain :: HadoopConfig -> RemoteError -> IO a
     runAgain cfg e | isStandbyError e = maybe (throwM e) run (dropNameNode cfg)
