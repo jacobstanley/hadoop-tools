@@ -52,7 +52,7 @@ executable hh
     Paths_hadoop_tools
 
   build-depends:
-      base                 >= 4.7 && < 5
+      base                 >= 4.8 && < 5
     , attoparsec           >= 0.12
     , boxes                >= 0.1
     , bytestring           >= 0.10

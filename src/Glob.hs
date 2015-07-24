@@ -8,7 +8,6 @@ module Glob
 
 ------------------------------------------------------------------------
 
-import           Control.Applicative ((<$>))
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as B
 import           Data.Monoid ((<>))
@@ -49,7 +48,9 @@ globToRegex' (c:cs)         = escape c ++ globToRegex' cs
 escape :: Char -> String
 escape c | c `elem` regexChars = '\\' : [c]
          | otherwise = [c]
-    where regexChars = "\\+()^$.{}]|"
+    where
+      regexChars :: [Char]
+      regexChars = "\\+()^$.{}]|"
 
 charClass :: String -> String
 charClass (']':cs) = ']' : globToRegex' cs

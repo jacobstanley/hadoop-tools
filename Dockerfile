@@ -1,4 +1,4 @@
-FROM jystic/centos6-ghc7.8.4
+FROM jystic/centos6-ghc7.10.1
 
 # Dependencies
 RUN yum install -y epel-release rpmdevtools tar

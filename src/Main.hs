@@ -12,7 +12,6 @@ import qualified Data.Attoparsec.ByteString.Char8 as Atto
 import           Data.Bits ((.&.), shiftL, shiftR)
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as B
-import           Data.Foldable (foldMap)
 import           Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -32,7 +31,6 @@ import qualified System.FilePath as FilePath
 import qualified System.FilePath.Posix as Posix
 import           System.IO
 import           System.IO.Unsafe (unsafePerformIO)
-import           System.Locale (defaultTimeLocale)
 import           System.Posix.User (GroupEntry(..), getGroups, getGroupEntryForID)
 import           Text.PrettyPrint.Boxes hiding ((<>), (//))
 
@@ -349,7 +347,7 @@ subTest = SubCommand "test" "If file exists, has zero length, is a directory the
                <*> switch        (short 'r' <> help "Test read permission is granted")
                <*> switch        (short 'w' <> help "Test write permission is granted")
                <*> switch        (short 'x' <> help "Test exectute permission is granted")
-    test path e z d f l r w x = SubHdfs $ do
+    test path _e z d f l r w x = SubHdfs $ do
         absPath <- getAbsolute path
         minfo <- getFileInfo absPath
         user <- liftIO getHadoopUser

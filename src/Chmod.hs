@@ -6,7 +6,6 @@ module Chmod (
     , applyChmod
     ) where
 
-import           Control.Applicative
 import           Control.Monad (guard, msum)
 import qualified Data.Attoparsec.ByteString.Char8 as Atto
 import           Data.Bits
@@ -102,7 +101,7 @@ applyChmod filetype = flip (foldl' f)
     minus :: ChmodWho -> Word16 -> Word16 -> Word16
     minus who old new = old `xor` setWho who new
 
-    foldRWX old = foldl' (\old what -> old .|. b what) 0 . mapMaybe (hX old)
+    foldRWX old = foldl' (\old' what -> old' .|. b what) 0 . mapMaybe (hX old)
 
     o3 u g o = u*64 + g*8 + o
 
