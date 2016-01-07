@@ -2,9 +2,12 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Data.Hadoop.Configuration
-    ( getHadoopConfig
+    ( authUser
+    , getHadoopConfig
     , getHadoopUser
     , getNameNodes
+    , readPrincipal
+    , writePrincipal
     ) where
 
 import           Control.Applicative ((<$>), (<*>))
@@ -27,9 +30,11 @@ import           Data.Hadoop.Types
 
 getHadoopConfig :: IO HadoopConfig
 getHadoopConfig = do
-    hcUser <- getHadoopUser
+    udUser <- getHadoopUser
+    let udAuthUser = Nothing
     hcNameNodes <- getNameNodes
     let hcProxy = Nothing
+    let hcUser = UserDetails{..}
     return HadoopConfig{..}
 
 ------------------------------------------------------------------------
@@ -45,6 +50,28 @@ getHadoopUser = maybe fromUnix return =<< fromEnv
 
 ------------------------------------------------------------------------
 
+-- Extract the name to be used for authentication
+authUser :: UserDetails -> User
+authUser UserDetails{..} = maybe udUser id udAuthUser
+
+------------------------------------------------------------------------
+
+readPrincipal :: Text -> HostName -> Maybe Principal
+readPrincipal p host =
+    case T.split (`elem` ['/', '@']) p of
+        [pService,"_HOST",pRealm] -> let pHost = host in Just Principal{..}
+        [pService,pHost,pRealm]   -> Just Principal{..}
+        _                         ->
+            case T.split (`elem` ['@']) p of
+                [pService,pRealm] -> let pHost = "" in Just Principal{..}
+                _                 -> Nothing
+
+writePrincipal :: Principal -> Text
+writePrincipal Principal{..} = case pHost of
+    "" -> pService <> "@" <> pRealm
+    _  -> pService <> "/" <> pHost <> "@" <> pRealm
+
+------------------------------------------------------------------------
 type HadoopXml = H.HashMap Text Text
 
 getNameNodes :: IO [NameNode]
@@ -54,10 +81,11 @@ getNameNodes = do
     return $ fromMaybe []
            $ resolveNameNode cfg <$> (stripProto =<< H.lookup fsDefaultNameKey cfg)
   where
-    proto            = "hdfs://"
-    fsDefaultNameKey = "fs.defaultFS"
-    nameNodesPrefix  = "dfs.ha.namenodes."
-    rpcAddressPrefix = "dfs.namenode.rpc-address."
+    proto             = "hdfs://"
+    fsDefaultNameKey  = "fs.defaultFS"
+    nameNodesPrefix   = "dfs.ha.namenodes."
+    rpcAddressPrefix  = "dfs.namenode.rpc-address."
+    namenodePrincipal = "dfs.namenode.kerberos.principal"
 
     stripProto :: Text -> Maybe Text
     stripProto uri | proto `T.isPrefixOf` uri = Just (T.drop (T.length proto) uri)
@@ -65,9 +93,23 @@ getNameNodes = do
 
     resolveNameNode :: HadoopXml -> Text -> [NameNode]
     resolveNameNode cfg name = case parseEndpoint name of
-        Just ep -> [ep] -- contains "host:port" directly
-        Nothing -> mapMaybe (\nn -> lookupAddress cfg $ name <> "." <> nn)
-                            (lookupNameNodes cfg name)
+        -- contains "host:port" directly
+        Just ep@Endpoint{..} ->
+            [ NameNode
+                { nnEndPoint = ep
+                , nnPrincipal = lookupPrincipal cfg name epHost
+                }
+            ]
+        Nothing -> mapMaybe (\nn -> do
+                                ep <- lookupAddress cfg $ name <> "." <> nn
+                                let pr = lookupPrincipal cfg (name <> "." <> nn) (epHost ep)
+                                return $ NameNode ep pr
+                            ) (lookupNameNodes cfg name)
+
+    lookupPrincipal :: HadoopXml -> Text -> HostName -> Maybe Principal
+    lookupPrincipal cfg name host = do
+            p <- H.lookup namenodePrincipal cfg
+            readPrincipal p host
 
     lookupNameNodes :: HadoopXml -> Text -> [Text]
     lookupNameNodes cfg name = fromMaybe []
