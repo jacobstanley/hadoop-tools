@@ -1,4 +1,7 @@
-#!/bin/bash -ex
+#!/usr/bin/env bash
+
+set -e
+set -x
 
 OUTPUT=$PWD/dist/centos6
 DOCKER_TAG=hadoop-tools

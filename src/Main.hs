@@ -35,7 +35,7 @@ import           System.IO.Unsafe (unsafePerformIO)
 import           System.Posix.User (GroupEntry(..), getGroups, getGroupEntryForID)
 import           Text.PrettyPrint.Boxes hiding ((<>), (//))
 
-import           Data.Hadoop.Configuration (getHadoopConfig, getHadoopUser)
+import           Data.Hadoop.Configuration (getHadoopConfig, getHadoopUser, readPrincipal)
 import           Data.Hadoop.HdfsPath
 import           Data.Hadoop.Types
 import           Network.Hadoop.Hdfs hiding (runHdfs)
@@ -101,8 +101,15 @@ configPath = unsafePerformIO $ do
     return (home `FilePath.combine` ".hh")
 {-# NOINLINE configPath #-}
 
-getHdfsUser :: IO (Maybe User)
-getHdfsUser = C.load [Optional configPath] >>= flip C.lookup "hdfs.user"
+getHdfsUser :: IO (Maybe UserDetails)
+getHdfsUser = do
+    cfg <- C.load [Optional configPath]
+    udUser <- C.lookup cfg "hdfs.user"
+    udAuthUser <- C.lookup cfg "auth.user"
+    return $ UserDetails <$> udUser <*> pure udAuthUser
+
+
+-- getHdfsUser = C.load [Optional configPath] >>= flip C.lookup "hdfs.user"
 
 getGroupNames :: IO [Group]
 getGroupNames = do
@@ -112,10 +119,13 @@ getGroupNames = do
 
 getNameNode :: IO (Maybe NameNode)
 getNameNode = do
-    cfg  <- C.load [Optional configPath]
-    host <- C.lookup cfg "namenode.host"
-    port <- C.lookupDefault 8020 cfg "namenode.port"
-    return (Endpoint <$> host <*> pure port)
+    cfg     <- C.load [Optional configPath]
+    host    <- C.lookup cfg "namenode.host"
+    port    <- C.lookupDefault 8020 cfg "namenode.port"
+    prinStr <- C.lookup cfg "namenode.principal"
+    let endpoint  = Endpoint <$> host <*> pure port
+        principal = join $ readPrincipal <$> prinStr <*> host
+    return $ flip NameNode principal <$> endpoint 
 
 getSocksProxy :: IO (Maybe SocksProxy)
 getSocksProxy = do
@@ -134,7 +144,7 @@ workingDirConfigPath = unsafePerformIO $ do
 {-# NOINLINE workingDirConfigPath #-}
 
 getHomeDir :: MonadIO m => m HdfsPath
-getHomeDir = liftIO $ (("/user" </>) . T.encodeUtf8 . hcUser) <$> getConfig
+getHomeDir = liftIO $ (("/user" </>) . T.encodeUtf8 . (udUser . hcUser)) <$> getConfig
 
 getWorkingDir :: MonadIO m => m HdfsPath
 getWorkingDir = liftIO $ handle onError

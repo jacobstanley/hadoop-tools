@@ -2,6 +2,7 @@ FROM jystic/centos6-ghc7.10.1
 
 # Dependencies
 RUN yum install -y epel-release rpmdevtools tar
+RUN yum install -y libgsasl-devel
 
 # Update cabal
 RUN cabal update
