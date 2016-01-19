@@ -1,5 +1,5 @@
 name:          hadoop-rpc
-version:       1.0.0.2
+version:       1.1.0.0
 
 synopsis:
   Use the Hadoop RPC interface from Haskell.
@@ -16,7 +16,7 @@ description:
 homepage:      http://github.com/jystic/hadoop-rpc
 license:       Apache-2.0
 license-file:  LICENSE
-author:        Jacob Stanley, Conrad Parker
+author:        Jacob Stanley, Conrad Parker, Luke Clifton
 maintainer:    Jacob Stanley <jacob@stanley.io>
 category:      Data
 build-type:    Simple
@@ -83,7 +83,7 @@ test-suite hdfs-tests
     buildable: False
 
   build-depends:
-      base >= 4.7 && < 5
+      base        >= 4.7 && < 5
     , hadoop-rpc
     , protobuf
     , tasty
