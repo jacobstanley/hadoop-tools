@@ -103,10 +103,10 @@ runHdfs hdfs = do
     runHdfs' config hdfs
 
 runHdfs' :: HadoopConfig -> Hdfs a -> IO a
-runHdfs' config@HadoopConfig{..} hdfs = S.bracketSocket hcProxy nameNode session
+runHdfs' config@HadoopConfig{..} hdfs = S.bracketSocket hcProxy (nnEndPoint nameNode) session
   where
     session socket = do
-        conn <- initConnectionV9 config hdfsProtocol socket
+        conn <- initConnectionV9 config nameNode hdfsProtocol socket
         unHdfs hdfs conn
 
     nameNode = case hcNameNodes of
