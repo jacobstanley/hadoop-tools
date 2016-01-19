@@ -7,11 +7,11 @@
 
 Summary: Tools for working with Hadoop written with performance in mind.
 Name: hadoop-tools
-Version: 0.7
-Release: 2
+Version: 1.0
+Release: 1
 License: BSD
 Group: Development/Tools
-Requires: gmp bash-completion
+Requires: gmp bash-completion libgsasl
 SOURCE0 : %{name}-%{version}.tar.gz
 URL: http://github.com/jystic/hadoop-tools
 
@@ -41,6 +41,8 @@ BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
 %{_bindir}/hh
 
 %changelog
+* Wed Jan 20 2016 Jacob Stanley <jacob@stanley.io> 1.0-1
+- Kerberos/SASL support
 * Fri Jul 24 2015 Jacob Stanley <jacob@stanley.io> 0.7-2
 - Fixed bug where find didn't work with automatic switchover
 * Fri Jul 24 2015 Jacob Stanley <jacob@stanley.io> 0.7-1

@@ -61,18 +61,21 @@ rpmdev-setuptree
 
 # Bundle "sources" in to a tarball
 cd /root/rpmbuild
-mkdir -p hadoop-tools-0.7/usr/bin/
-mkdir -p hadoop-tools-0.7/etc/bash_completion.d/
-install -m 755 ${WORKDIR_RW}/dist/build/hh/hh hadoop-tools-0.7/usr/bin/
-install -m 755 ${WORKDIR_RW}/hh-completion.bash hadoop-tools-0.7/etc/bash_completion.d/
-tar -zcvf SOURCES/hadoop-tools-0.7.tar.gz hadoop-tools-0.7/
+mkdir -p hadoop-tools-1.0/usr/bin/
+mkdir -p hadoop-tools-1.0/etc/bash_completion.d/
+install -m 755 ${WORKDIR_RW}/dist/build/hh/hh hadoop-tools-1.0/usr/bin/
+install -m 755 ${WORKDIR_RW}/hh-completion.bash hadoop-tools-1.0/etc/bash_completion.d/
+tar -zcvf SOURCES/hadoop-tools-1.0.tar.gz hadoop-tools-1.0/
 
 # Build RPM
 cp /src/hadoop-tools/hadoop-tools.spec SPECS/
-rpmbuild -ba                           SPECS/hadoop-tools.spec
+rpmbuild -ba SPECS/hadoop-tools.spec
 
 # Install RPM
 yum install -y RPMS/x86_64/*.rpm
+
+# Run hh from rpm
+hh --help
 
 # Copy Output
 cp ${WORKDIR_RW}/dist/build/hh/hh /dist/

@@ -1,5 +1,5 @@
 name:          hadoop-tools
-version:       0.7.3
+version:       1.0.0
 
 synopsis:
   Fast command line tools for working with Hadoop.
@@ -8,9 +8,6 @@ description:
   hh - Blazing fast interaction with HDFS
   .
   These tools support v9 of the Hadoop RPC protocol (CDH 5.x and above).
-  .
-  Earlier versions (< 0.6) can be installed using --constraint=hadoop-rpc==0.1.1.1
-  if you need v7 support.
   .
   > hh cat     - Print the contents of a file to stdout
   > hh cd      - Change working directory
@@ -28,7 +25,7 @@ description:
 homepage:      http://github.com/jystic/hadoop-tools
 license:       Apache-2.0
 license-file:  LICENSE
-author:        Jacob Stanley, Conrad Parker
+author:        Jacob Stanley, Conrad Parker, Luke Clifton
 maintainer:    Jacob Stanley <jacob@stanley.io>
 category:      Data
 build-type:    Simple
@@ -60,7 +57,7 @@ executable hh
     , clock                == 0.5.*
     , exceptions           >= 0.6
     , filepath             >= 1.3
-    , hadoop-rpc           >= 1.0.0.2
+    , hadoop-rpc           >= 1.1
     , old-locale           >= 1.0
     , optparse-applicative >= 0.11
     , protobuf             >= 0.2.0.4
@@ -82,11 +79,11 @@ test-suite test
   main-is:
     test.hs
   build-depends:
-      base >= 4 && < 5
+      base                 >= 4 && < 5
     , attoparsec
-    , bytestring           >= 0.10
-    , hadoop-rpc           >= 0.1.1.1
-    , tasty >= 0.7
+    , bytestring
+    , hadoop-rpc
+    , tasty                >= 0.7
     , tasty-hunit
     , tasty-quickcheck
     , vector
