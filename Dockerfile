@@ -12,11 +12,11 @@ ADD ./hadoop-tools.cabal /src/hadoop-tools/hadoop-tools.cabal
 
 # Docker will cache this command as a layer, freeing us up to
 # modify source code without re-installing dependencies
-RUN cd /src/hadoop-tools && cabal install --only-dependencies -j4
+RUN cd /src/hadoop-tools && (mafia build || exit 0)
 
 # Add and install application code
 ADD . /src/hadoop-tools
-RUN cd /src/hadoop-tools && cabal install
+RUN cd /src/hadoop-tools && mafia build
 
 # Create RPM Tree
 RUN rpmdev-setuptree
@@ -25,7 +25,7 @@ RUN rpmdev-setuptree
 WORKDIR /root/rpmbuild
 RUN mkdir -p hadoop-tools-0.7/usr/bin/
 RUN mkdir -p hadoop-tools-0.7/etc/bash_completion.d/
-RUN install -m 755 /root/.cabal/bin/hh                  hadoop-tools-0.7/usr/bin/
+RUN install -m 755 /src/hadoop-tools/dist/build/hh/hh   hadoop-tools-0.7/usr/bin/
 RUN install -m 755 /src/hadoop-tools/hh-completion.bash hadoop-tools-0.7/etc/bash_completion.d/
 RUN tar -zcvf SOURCES/hadoop-tools-0.7.tar.gz           hadoop-tools-0.7/
 
