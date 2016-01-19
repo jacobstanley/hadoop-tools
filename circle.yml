@@ -7,6 +7,7 @@ dependencies:
     - docker/cache
   override:
     - docker pull jystic/centos6-ghc7.10.1
+    - docker/build-centos6.sh
 
 test:
   override:
