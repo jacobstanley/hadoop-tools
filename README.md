@@ -80,3 +80,23 @@ proxy {
   port = 1080
 }
 ```
+
+### Kerberos / SASL
+
+In order to use Kerberos authentication you must supply information about
+the `principal` for both your user and your namenode.
+
+```config
+namenode {
+  host = "hostname or ip address"
+  port = 7020 # defaults to 8020
+  principal = "hdfs/hostname@REALM.COM"
+}
+
+auth {
+    user = "username@REALM.COM"
+}
+```
+
+If you don't provide an `auth.user` field it will assume it is the same as
+your `hdfs.user` field, which is probably not what you want.
