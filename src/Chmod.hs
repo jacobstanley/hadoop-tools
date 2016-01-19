@@ -129,9 +129,13 @@ applyChmod filetype = flip (foldl' f)
     b Chmod_r = 4
     b Chmod_w = 2
     b Chmod_x = 1
+    b Chmod_X = error "applyChmod: can't set a bit for X"
+    b Chmod_s = error "applyChmod: can't set a bit for s"
+    b Chmod_t = error "applyChmod: can't set a bit for t"
 
     -- Number of bits to shift for who
     s :: ChmodWho -> Int
     s Chmod_u = 6
     s Chmod_g = 3
     s Chmod_o = 0
+    s Chmod_a = error "applyChmod: can't shift for a"
