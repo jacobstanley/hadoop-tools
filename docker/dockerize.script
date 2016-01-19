@@ -1,0 +1,79 @@
+#!/usr/bin/env dockerize
+FROM=jystic/centos6-ghc7.10.1
+#TAG=hadoop-tools
+OUTPUT=$PWD/dist/centos6
+CACHE=/var/cache/dockerize
+WORKDIR=/var/hadoop-tools
+WORKDIR_RW=/src/hadoop-tools
+VOLUME="${PWD}/docker/cache:${CACHE} ${PWD}:${WORKDIR}:ro ${OUTPUT}:/dist"
+#!/bin/sh
+set -e
+set -x
+
+# Output
+mkdir -p ${OUTPUT}
+
+# Caches
+mkdir -p ${CACHE}/yum
+rm -rf /var/cache/yum
+ln -s ${CACHE}/yum /var/cache/yum
+ls -l /var/cache/yum
+
+mkdir -p ${CACHE}/cabal
+ln -s ${CACHE}/cabal /root/.cabal
+
+mkdir -p /root/.ambiata
+mkdir -p ${CACHE}/mafia
+ln -s ${CACHE}/mafia /root/.ambiata/mafia
+
+# Dependencies
+cat /etc/yum.conf | grep -v keepcache > /etc/yum.conf.new
+echo "keepcache=1" >> /etc/yum.conf.new
+mv /etc/yum.conf.new /etc/yum.conf
+yum install -y epel-release rpmdevtools tar git
+yum install -y libgsasl-devel
+
+# Working directory
+mkdir -p ${WORKDIR_RW}
+cp    ${WORKDIR}/*.cabal     ${WORKDIR_RW}/
+cp    ${WORKDIR}/*.spec      ${WORKDIR_RW}/
+cp    ${WORKDIR}/*.bash      ${WORKDIR_RW}/
+cp    ${WORKDIR}/Setup.hs    ${WORKDIR_RW}/
+cp    ${WORKDIR}/LICENSE     ${WORKDIR_RW}/
+cp    ${WORKDIR}/mafia       ${WORKDIR_RW}/
+cp    ${WORKDIR}/.gitmodules ${WORKDIR_RW}/
+cp -r ${WORKDIR}/.git        ${WORKDIR_RW}/
+cp -r ${WORKDIR}/lib         ${WORKDIR_RW}/
+cp -r ${WORKDIR}/src         ${WORKDIR_RW}/
+cp -r ${WORKDIR}/tests       ${WORKDIR_RW}/
+cd ${WORKDIR_RW}
+
+# Build hh
+./mafia update
+./mafia build
+./mafia testci
+
+# Run hh
+${WORKDIR_RW}/dist/build/hh/hh --help
+
+# Create RPM Tree
+rpmdev-setuptree
+
+# Bundle "sources" in to a tarball
+cd /root/rpmbuild
+mkdir -p hadoop-tools-0.7/usr/bin/
+mkdir -p hadoop-tools-0.7/etc/bash_completion.d/
+install -m 755 ${WORKDIR_RW}/dist/build/hh/hh hadoop-tools-0.7/usr/bin/
+install -m 755 ${WORKDIR_RW}/hh-completion.bash hadoop-tools-0.7/etc/bash_completion.d/
+tar -zcvf SOURCES/hadoop-tools-0.7.tar.gz hadoop-tools-0.7/
+
+# Build RPM
+cp /src/hadoop-tools/hadoop-tools.spec SPECS/
+rpmbuild -ba                           SPECS/hadoop-tools.spec
+
+# Install RPM
+yum install -y RPMS/x86_64/*.rpm
+
+# Copy Output
+cp ${WORKDIR_RW}/dist/build/hh/hh /dist/
+cp /root/rpmbuild/RPMS/x86_64/*   /dist/

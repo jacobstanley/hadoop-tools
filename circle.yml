@@ -3,12 +3,14 @@ machine:
     - docker
 
 dependencies:
+  cache_directories:
+    - docker/cache
   override:
     - docker pull jystic/centos6-ghc7.10.1
 
 test:
   override:
-    - ./build-centos6.sh
+    - docker/build-centos6.sh
 
 general:
   artifacts:

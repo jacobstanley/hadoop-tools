@@ -1,0 +1,87 @@
+#!/bin/sh
+####
+# Dockerize: A tiny replacement for Dockerfiles
+# This script leverages `docker run` and `docker commit` to provide a usable workaround for
+# restrictions of `docker build` and Dockerfile syntax to strictly host-independent builds.
+#
+# See these discussions:
+# https://github.com/docker/docker/pull/1124
+# https://github.com/docker/docker/issues/3156
+# https://github.com/docker/docker/issues/3949
+# https://github.com/docker/docker/issues/14080
+# 
+# 
+# To use, put this script somewhere in your PATH and add it as a shebang for your build script.
+# Set relevant environment variables before a second shebang line marking the start of your Docker installation.
+# FROM, RUNDIR, and VOLUME variables will be automatically passed to `docker run`.
+# TAG, EXPOSE, and WORKDIR variables will be automatically passed to `docker commit`.
+# All other variables will be passed as environment arguments to `docker run`,
+# making them available within your build script.
+# For example, this dockerize code will cache and reuse Alpine Linux packages between builds:
+#
+#   #!/usr/bin/env dockerize
+#   FROM=alpine
+#   TAG=${TAG:-wjordan/my-image}
+#   WORKDIR=/var/cache/dockerize
+#   CACHE=/var/cache/docker
+#   EXPOSE=3001
+#   VOLUME="${HOME}/.docker-cache:${CACHE} ${PWD}:${WORKDIR}:ro /tmp"
+#   #!/bin/sh
+#   ln -s ${CACHE}/apk /var/cache/apk
+#   ln -s ${CACHE}/apk /etc/apk/cache
+#   set -e
+#   apk --update add gcc g++ make libc-dev python
+#   [...etc etc build...]
+
+####
+
+SCRIPT=$1
+
+set -a
+
+# eval the script until the second hashbang
+SCRIPT_F=$(cat ${SCRIPT} | sed '1d;/#!/q')
+export1_f=$(mktemp 2>/dev/null || mktemp -t 'export1-')
+export2_f=$(mktemp 2>/dev/null || mktemp -t 'export2-')
+export -p | sort > ${export1_f}
+eval "${SCRIPT_F}"
+export -p | sort > ${export2_f}
+EXPORTS=$(
+  comm -13 ${export1_f} ${export2_f} \
+  | sed '/FROM/d' \
+  | sed '/TAG/d' \
+  | sed '/EXPOSE/d' \
+  | sed '/VOLUME/d' \
+  | sed '/RUNDIR/d' \
+  | sed '/CMD/d'
+)
+rm -f ${export1_f} ${export2_f}
+
+# Value of second hashbang
+SH=$(sed -n '1d;/#!/s/#!//p' ${SCRIPT})
+# Script from the second hashbang
+SH_SCRIPT=$(sed '1,/#!/d' ${SCRIPT})
+
+# Add VOLUME and WORKDIR to docker run
+VOLUME_S=$(test -n "${VOLUME:=}" && echo ${VOLUME} | tr '\n' '\0' | tr ' ' '\0' | xargs -0 -n 1 -I {} echo "-v {}" | tr '\n' ' ')
+RUNDIR_S=$(test -n "${RUNDIR:=}" && echo -w ${RUNDIR})
+
+# Add all other added variables as -e
+ENV_S=$(echo ${EXPORTS} | sed 's/export/-e/g' | tr '\n' ' ')
+
+# Add Dockerfile parameters to docker commit
+EXPOSE_S=$(test -n "${EXPOSE:=}" && echo --change=\"EXPOSE ${EXPOSE}\")
+WORKDIR_S=$(test -n "${WORKDIR:=}" && echo --change=\"WORKDIR ${WORKDIR}\")
+CMD_S=$(test -n "${CMD:=}" && echo --change=\'CMD ${CMD}\')
+
+# Ensure container is stopped/removed when script finishes/aborts
+CID=$(mktemp -u 2>/dev/null || mktemp -u -t 'cid-')
+trap 'docker rm -f $(cat ${CID}) > /dev/null 2>&1' EXIT INT TERM HUP
+
+docker run -t --cidfile=${CID} \
+  ${ENV_S} \
+  ${VOLUME_S} \
+  ${RUNDIR_S} \
+  ${FROM:-scratch} \
+  /bin/sh -c "echo \"${SH_SCRIPT}\" | ${SH}" && \
+  /bin/sh -c "docker commit ${WORKDIR_S} ${EXPOSE_S} ${CMD_S} $(cat ${CID}) ${TAG:-}"
