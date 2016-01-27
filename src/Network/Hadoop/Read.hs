@@ -3,6 +3,29 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 
+{-|
+
+ Example for accessing HDFS files:
+
+>import qualified Data.ByteString.Char8 as BC
+>import Network.Hadoop.Hdfs
+>import Network.Hadoop.Read
+>import System.IO (IOMode(..), withBinaryFile)
+>
+> main :: IO ()
+> main = do
+>  (Just readHandle) <- runHdfs $ openRead $ BC.pack 
+>  withBinaryFile "local-file" WriteMode $ \handle ->
+>    withHdfsReader (BC.hPut handle) "/absolute/path/to/file"
+>
+>  withHdfsReader :: (BC.ByteString -> IO ()) -> String -> IO ()
+>  withHdfsReader action path = do
+>    readHandle_ <- runHdfs $ openRead $ BC.pack path
+>    case readHandle_ of
+>     (Just readHandle) -> hdfsMapM_ action readHandle
+>     Nothing -> error "no read handle
+
+-}
 module Network.Hadoop.Read
     ( HdfsReadHandle
     , openRead
