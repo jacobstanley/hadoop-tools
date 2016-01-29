@@ -1,0 +1,10 @@
+flags:
+  hadoop-rpc:
+    travis: false
+extra-package-dbs: []
+packages:
+- '.'
+extra-deps:
+- gsasl-0.3.6
+- protobuf-0.2.1.0
+resolver: lts-2.22
