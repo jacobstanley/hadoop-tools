@@ -17,19 +17,23 @@ module Network.Hadoop.Stream
     , close
     ) where
 
-import           Control.Applicative ((<$>))
+import           Control.Applicative
 import qualified Control.Concurrent.Chan as Chan
 import           Control.Exception (throwIO)
 import           Control.Monad (forM_)
+
 import qualified Data.Attoparsec.ByteString as Atto
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
 import           Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import qualified Data.Serialize.Get as Get
 import qualified Data.Serialize.Put as Put
+
 import qualified Network.Socket as S
 import qualified Network.Socket.ByteString as B (recv)
 import qualified Network.Socket.ByteString.Lazy as L (sendAll)
+
+import           Prelude
 
 import           Data.Hadoop.Types
 

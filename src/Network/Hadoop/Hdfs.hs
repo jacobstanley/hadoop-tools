@@ -25,27 +25,29 @@ module Network.Hadoop.Hdfs
     , setPermissions
     ) where
 
-import           Control.Applicative (Applicative(..), (<$>))
+import           Control.Applicative
 import           Control.Concurrent.STM
 import           Control.Exception (SomeException(..), throw)
 import           Control.Monad (ap, when)
 import           Control.Monad.Catch (MonadMask(..), MonadThrow(..), MonadCatch(..))
 import           Control.Monad.IO.Class (MonadIO(..))
+
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as B
 import           Data.Maybe (fromMaybe)
 import           Data.Monoid ((<>))
+import           Data.ProtocolBuffers
+import           Data.ProtocolBuffers.Orphans ()
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Vector as V
 import           Data.Word (Word32)
 
+import           Prelude
+
 import qualified Data.Hadoop.Protobuf.ClientNameNode as P
 import qualified Data.Hadoop.Protobuf.Hdfs as P
-import           Data.ProtocolBuffers
-import           Data.ProtocolBuffers.Orphans ()
-
 import           Data.Hadoop.Configuration
 import           Data.Hadoop.HdfsPath
 import           Data.Hadoop.Types

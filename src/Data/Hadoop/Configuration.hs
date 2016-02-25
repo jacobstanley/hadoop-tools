@@ -10,8 +10,9 @@ module Data.Hadoop.Configuration
     , writePrincipal
     ) where
 
-import           Control.Applicative ((<$>), (<*>))
+import           Control.Applicative
 import           Control.Exception (IOException, handle)
+
 import qualified Data.ByteString.Char8 as B
 import qualified Data.HashMap.Lazy as H
 import           Data.Maybe (fromMaybe, mapMaybe)
@@ -22,7 +23,11 @@ import qualified Data.Text.Read as T
 
 import           System.Environment (lookupEnv)
 import           System.Posix.User (getEffectiveUserName)
-import           Text.XmlHtml
+
+import           Text.XmlHtml (Document, parseXML, docContent)
+import           Text.XmlHtml (nodeText, childElementTag, descendantElementsTag)
+
+import           Prelude
 
 import           Data.Hadoop.Types
 

@@ -14,7 +14,7 @@
 >
 > main :: IO ()
 > main = do
->  (Just readHandle) <- runHdfs $ openRead $ BC.pack 
+>  (Just readHandle) <- runHdfs $ openRead $ BC.pack
 >  withBinaryFile "local-file" WriteMode $ \handle ->
 >    withHdfsReader (BC.hPut handle) "/absolute/path/to/file"
 >
@@ -36,25 +36,29 @@ module Network.Hadoop.Read
     , hdfsCat
     ) where
 
-import           Control.Applicative ((<$>), (<$))
+import           Control.Applicative
 import           Control.Exception (IOException, throwIO)
 import           Control.Monad (foldM)
 import           Control.Monad.Catch (MonadMask, catch)
 import           Control.Monad.IO.Class (MonadIO(..))
 import           Control.Monad.Loops (iterateUntilM)
-import           Control.Monad.Trans.State
 import           Control.Monad.Trans.Class (lift)
+import           Control.Monad.Trans.State (StateT(..), execStateT, get, put)
+
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as B
 import           Data.Maybe (fromMaybe)
 import           Data.ProtocolBuffers
 import           Data.ProtocolBuffers.Orphans ()
+import qualified Data.Serialize.Get as Get
+import qualified Data.Serialize.Put as Put
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Data.Word (Word64)
 
-import qualified Data.Serialize.Get as Get
-import qualified Data.Serialize.Put as Put
+import           Text.Printf (printf)
+
+import           Prelude hiding (rem)
 
 import           Data.Hadoop.Protobuf.ClientNameNode
 import           Data.Hadoop.Protobuf.DataTransfer
@@ -64,9 +68,6 @@ import           Network.Hadoop.Hdfs
 import           Network.Hadoop.Rpc
 import qualified Network.Hadoop.Socket as S
 import qualified Network.Hadoop.Stream as Stream
-import           Text.Printf (printf)
-
-import           Prelude hiding (rem)
 
 ------------------------------------------------------------------------
 

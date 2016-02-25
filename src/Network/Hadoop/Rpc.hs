@@ -14,31 +14,34 @@ module Network.Hadoop.Rpc
     , invoke
     ) where
 
-import           Control.Applicative ((<$>))
+import           Control.Applicative
 import           Control.Concurrent (ThreadId, forkIO, newEmptyMVar, putMVar, takeMVar)
 import           Control.Concurrent.STM
 import           Control.Exception (SomeException(..), throwIO, handle)
 import           Control.Monad (forever, when)
 import           Control.Monad.IO.Class (liftIO)
+
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.HashMap.Strict as H
 import           Data.Hashable (Hashable)
 import           Data.Maybe (fromMaybe, isNothing)
-import           Data.Monoid ((<>))
-import           Data.Monoid (mempty)
-import           Data.Text (Text)
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
-import qualified Data.UUID as UUID
-import           System.Random (randomIO)
-
-import qualified Network.Protocol.SASL.GNU as GS
-
+import           Data.Monoid
 import           Data.ProtocolBuffers
 import           Data.ProtocolBuffers.Orphans ()
 import           Data.Serialize.Get
 import           Data.Serialize.Put
+import           Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
+import qualified Data.UUID as UUID
+
+import qualified Network.Protocol.SASL.GNU as GS
+import           Network.Socket (Socket)
+
+import           System.Random (randomIO)
+
+import           Prelude
 
 import           Data.Hadoop.Configuration
 import qualified Data.Hadoop.Protobuf.Headers as P
@@ -46,7 +49,6 @@ import           Data.Hadoop.Types
 import           Network.Hadoop.Sasl
 import qualified Network.Hadoop.Stream as S
 import           Network.Hadoop.Types
-import           Network.Socket (Socket)
 
 type CallId = Int
 
