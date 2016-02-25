@@ -49,7 +49,7 @@ executable hh
     Paths_hadoop_tools
 
   build-depends:
-      base                 >= 4.8 && < 5
+      base                 >= 4.7 && < 5
     , attoparsec           >= 0.12
     , boxes                >= 0.1
     , bytestring           >= 0.10
@@ -65,7 +65,7 @@ executable hh
     , split                >= 0.2
     , stm                  >= 2.4
     , text                 >= 1.1
-    , time                 >= 1.4
+    , time                 >= 1.5
     , transformers         >= 0.4
     , unix                 >= 2.7
     , vector               >= 0.10

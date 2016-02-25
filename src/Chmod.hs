@@ -6,7 +6,9 @@ module Chmod (
     , applyChmod
     ) where
 
+import           Control.Applicative
 import           Control.Monad (guard, msum)
+
 import qualified Data.Attoparsec.ByteString.Char8 as Atto
 import           Data.Bits
 import qualified Data.ByteString.Char8 as B
@@ -14,6 +16,8 @@ import           Data.Char (ord, isOctDigit)
 import           Data.List (foldl')
 import           Data.Maybe (mapMaybe)
 import           Data.Word (Word16)
+
+import           Prelude
 
 import           Data.Hadoop.Types (FileType(..))
 

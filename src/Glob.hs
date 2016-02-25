@@ -6,13 +6,17 @@ module Glob
     , matches
     ) where
 
-------------------------------------------------------------------------
+import           Control.Applicative
 
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as B
 import           Data.Monoid ((<>))
+
 import           System.IO.Unsafe (unsafeDupablePerformIO)
+
 import qualified Text.Regex.PCRE.ByteString as Regex
+
+import           Prelude
 
 ------------------------------------------------------------------------
 

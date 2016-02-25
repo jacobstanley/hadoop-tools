@@ -9,6 +9,7 @@ import           Control.Exception (SomeException, throwIO, fromException)
 import           Control.Monad
 import           Control.Monad.Catch (handle, throwM)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
+
 import qualified Data.Attoparsec.ByteString.Char8 as Atto
 import           Data.Bits ((.&.), shiftL, shiftR)
 import           Data.ByteString (ByteString)
@@ -17,15 +18,17 @@ import           Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
+import qualified Data.Foldable as Foldable
 import           Data.Time
 import           Data.Time.Clock.POSIX
 import qualified Data.Vector as V
 import           Data.Version (showVersion)
 import           Data.Word (Word16, Word64)
-
 import qualified Data.Configurator as C
 import           Data.Configurator.Types (Worth(..))
+
 import           Options.Applicative hiding (Success)
+
 import           System.Environment (getEnv)
 import           System.Exit (exitFailure)
 import qualified System.FilePath as FilePath
@@ -33,6 +36,7 @@ import qualified System.FilePath.Posix as Posix
 import           System.IO
 import           System.IO.Unsafe (unsafePerformIO)
 import           System.Posix.User (GroupEntry(..), getGroups, getGroupEntryForID)
+
 import           Text.PrettyPrint.Boxes hiding ((<>), (//))
 
 import           Data.Hadoop.Configuration (getHadoopConfig, getHadoopUser, readPrincipal)
@@ -199,7 +203,7 @@ sub :: SubCommand -> Mod CommandFields SubMethod
 sub SubCommand{..} = command subName (info subMethod $ progDesc subDescription)
 
 options :: Parser SubMethod
-options = subparser (foldMap sub allSubCommands)
+options = subparser (Foldable.foldMap sub allSubCommands)
 
 allSubCommands :: [SubCommand]
 allSubCommands =
