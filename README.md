@@ -6,7 +6,7 @@ Tools for working with Hadoop written with performance in mind.
 
 ## Where can I get it?
 
-See our latest release [v0.7.2](https://github.com/jystic/hadoop-tools/releases/tag/v0.7.2)!
+See our latest release [v1.0.1](https://github.com/jystic/hadoop-tools/releases/tag/v1.0.1)!
 
 ## Configuration
 
