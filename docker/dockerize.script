@@ -30,7 +30,7 @@ ln -s ${CACHE}/mafia /root/.ambiata/mafia
 cat /etc/yum.conf | grep -v keepcache > /etc/yum.conf.new
 echo "keepcache=1" >> /etc/yum.conf.new
 mv /etc/yum.conf.new /etc/yum.conf
-yum install -y epel-release rpmdevtools tar git
+yum install -y epel-release rpmdevtools tar git || true
 yum install -y libgsasl-devel
 
 # Working directory
@@ -49,6 +49,7 @@ cp -r ${WORKDIR}/tests       ${WORKDIR_RW}/
 cd ${WORKDIR_RW}
 
 # Build hh
+ghc-pkg recache
 ./mafia update
 ./mafia build
 ./mafia testci
