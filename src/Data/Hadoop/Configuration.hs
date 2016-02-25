@@ -97,17 +97,17 @@ getNameNodes = do
         Just ep@Endpoint{..} ->
             [ NameNode
                 { nnEndPoint = ep
-                , nnPrincipal = lookupPrincipal cfg name epHost
+                , nnPrincipal = lookupPrincipal cfg epHost
                 }
             ]
         Nothing -> mapMaybe (\nn -> do
                                 ep <- lookupAddress cfg $ name <> "." <> nn
-                                let pr = lookupPrincipal cfg (name <> "." <> nn) (epHost ep)
+                                let pr = lookupPrincipal cfg (epHost ep)
                                 return $ NameNode ep pr
                             ) (lookupNameNodes cfg name)
 
-    lookupPrincipal :: HadoopXml -> Text -> HostName -> Maybe Principal
-    lookupPrincipal cfg name host = do
+    lookupPrincipal :: HadoopXml -> HostName -> Maybe Principal
+    lookupPrincipal cfg host = do
             p <- H.lookup namenodePrincipal cfg
             readPrincipal p host
 
