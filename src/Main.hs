@@ -15,6 +15,7 @@ import           Data.Bits ((.&.), shiftL, shiftR)
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as B
 import           Data.Maybe (fromMaybe)
+import           Data.Monoid
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
@@ -210,6 +211,7 @@ allSubCommands =
     [ subCat
     , subChDir
     , subChMod
+    , subChOwn
     , subDiskUsage
     , subFind
     , subGet
@@ -271,6 +273,37 @@ subChMod = SubCommand "chmod" "Change permissions" go
                 liftIO . putStrLn . unwords $ ["NEW:", formatMode fsFileType mode]
                 -}
                 setPermissions (fromIntegral $ applyChmod fsFileType mode fsPermission) absPath
+
+subChOwn :: SubCommand
+subChOwn = SubCommand "chown" "Change ownership and/or group" go
+  where
+    go = chown <$> argument userGroup (help "[USER][:GROUP]")
+               <*> argument bstr (completeDir <> help "the file/directory to chown")
+
+    chown (Nothing,Nothing) _ = SubHdfs $ fail "You must supply either a user or a group"
+    chown (user,group) path = SubHdfs $ do
+        absPath <- getAbsolute path
+        minfo <- getFileInfo absPath
+        case minfo of
+            Nothing -> fail $ unwords ["No such file", B.unpack absPath]
+            Just FileStatus{..} -> do
+                setOwner user group absPath
+
+    userGroup :: ReadM (Maybe User, Maybe Group)
+    userGroup = unpackUserGroup <$> str
+
+    unpackUserGroup :: String -> (Maybe User, Maybe Group)
+    unpackUserGroup s =
+        let
+            userPart = takeWhile (/= ':') s
+
+            user = if null userPart then Nothing else Just $ T.pack userPart
+
+            group = case dropWhile (/= ':') s of
+                ":"     -> Nothing
+                ':':grp -> Just (T.pack grp)
+                _       -> Nothing
+        in (user, group)
 
 subDiskUsage :: SubCommand
 subDiskUsage = SubCommand "du" "Show the amount of space used by file or directory" go
