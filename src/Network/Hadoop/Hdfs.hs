@@ -23,6 +23,7 @@ module Network.Hadoop.Hdfs
     , delete
     , rename
     , setPermissions
+    , setOwner
     ) where
 
 import           Control.Applicative
@@ -269,6 +270,17 @@ setPermissions mode path = ignore <$>
     }
   where
     ignore :: P.SetPermissionResponse -> ()
+    ignore = const ()
+
+setOwner :: Maybe User -> Maybe Group -> HdfsPath -> Hdfs ()
+setOwner user group path = ignore <$>
+    hdfsInvoke "setOwner" P.SetOwnerRequest
+    { P.chownPath  = putField (T.decodeUtf8 path)
+    , P.chownUser  = putField user
+    , P.chownGroup = putField group
+    }
+  where
+    ignore :: P.SetOwnerResponse -> ()
     ignore = const ()
 
 ------------------------------------------------------------------------
