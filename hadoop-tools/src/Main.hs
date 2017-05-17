@@ -9,7 +9,7 @@ import           Control.Concurrent.STM
 import           Control.Exception (SomeException, throwIO, fromException)
 import           Control.Monad
 import           Control.Monad.Catch (handle, throwM)
-import           Control.Monad.IO.Class (MonadIO, liftIO)
+import           Control.Monad.IO.Class (liftIO)
 
 import qualified Data.Attoparsec.ByteString.Char8 as Atto
 import           Data.Bits ((.&.), shiftL, shiftR)
@@ -19,30 +19,22 @@ import           Data.Maybe (fromMaybe)
 import           Data.Monoid
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import qualified Data.Text.IO as T
 import qualified Data.Foldable as Foldable
 import           Data.Time
 import           Data.Time.Clock.POSIX
 import qualified Data.Vector as V
 import           Data.Version (showVersion)
 import           Data.Word (Word16, Word64)
-import qualified Data.Configurator as C
-import           Data.Configurator.Types (Worth(..))
 
 import           Options.Applicative hiding (Success)
 import           Options.Applicative.Types (readerAsk)
 
-import           System.Environment (getEnv)
-import           System.Exit (exitFailure)
-import qualified System.FilePath as FilePath
 import qualified System.FilePath.Posix as Posix
 import           System.IO
-import           System.IO.Unsafe (unsafePerformIO)
-import           System.Posix.User (GroupEntry(..), getGroups, getGroupEntryForID)
 
 import           Text.PrettyPrint.Boxes hiding ((<>), (//))
 
-import           Data.Hadoop.Configuration (getHadoopConfig, getHadoopUser, readPrincipal)
+import           Data.Hadoop.Configuration (getHadoopUser)
 import           Data.Hadoop.HdfsPath
 import           Data.Hadoop.Types
 import           Network.Hadoop.Hdfs hiding (runHdfs)
@@ -53,6 +45,10 @@ import qualified Glob
 
 import           Paths_hadoop_tools (version)
 
+import Hadoop.Tools.Run
+import Hadoop.Tools.Options
+import Hadoop.Tools.Configuration
+
 ------------------------------------------------------------------------
 
 main :: IO ()
@@ -60,136 +56,10 @@ main = do
     cmd <- execParser optsParser
     case cmd of
       SubIO   io   -> io
-      SubHdfs hdfs -> runHdfs hdfs
+      SubHdfs hdfs -> handle exitError $ runHdfs hdfs
   where
     optsParser = info (helper <*> options)
                       (fullDesc <> header "hh - Blazing fast interaction with HDFS")
-
-runHdfs :: forall a. Hdfs a -> IO a
-runHdfs hdfs = handle exitError $ do
-    config <- getConfig
-    run config
-  where
-    exitError :: RemoteError -> IO a
-    exitError err = printError err >> exitFailure
-
-    run :: HadoopConfig -> IO a
-    run cfg = handle (runAgain cfg) (runHdfs' cfg hdfs)
-
-    runAgain :: HadoopConfig -> RemoteError -> IO a
-    runAgain cfg e | isStandbyError e = maybe (throwM e) run (dropNameNode cfg)
-                   | otherwise        = throwM e
-
-    dropNameNode :: HadoopConfig -> Maybe HadoopConfig
-    dropNameNode cfg | null ns   = Nothing
-                     | otherwise = Just (cfg { hcNameNodes = ns })
-      where
-        ns = drop 1 (hcNameNodes cfg)
-
-getConfig :: IO HadoopConfig
-getConfig = do
-    hdfsUser   <- getHdfsUser
-    nameNode   <- getNameNode
-    socksProxy <- getSocksProxy
-
-    liftM ( set hdfsUser   (\c x -> c { hcUser      = x })
-          . set nameNode   (\c x -> c { hcNameNodes = [x] })
-          . set socksProxy (\c x -> c { hcProxy     = Just x })
-          ) getHadoopConfig
-  where
-    set :: Maybe a -> (b -> a -> b) -> b -> b
-    set m f c = maybe c (f c) m
-
-------------------------------------------------------------------------
-
-configPath :: FilePath
-configPath = unsafePerformIO $ do
-    home <- getEnv "HOME"
-    return (home `FilePath.combine` ".hh")
-{-# NOINLINE configPath #-}
-
-getHdfsUser :: IO (Maybe UserDetails)
-getHdfsUser = do
-    cfg <- C.load [Optional configPath]
-    udUser <- C.lookup cfg "hdfs.user"
-    udAuthUser <- C.lookup cfg "auth.user"
-    return $ UserDetails <$> udUser <*> pure udAuthUser
-
-
--- getHdfsUser = C.load [Optional configPath] >>= flip C.lookup "hdfs.user"
-
-getGroupNames :: IO [Group]
-getGroupNames = do
-    groups <- getGroups
-    entries <- mapM getGroupEntryForID groups
-    return $ map (T.pack . groupName) entries
-
-getNameNode :: IO (Maybe NameNode)
-getNameNode = do
-    cfg     <- C.load [Optional configPath]
-    host    <- C.lookup cfg "namenode.host"
-    port    <- C.lookupDefault 8020 cfg "namenode.port"
-    prinStr <- C.lookup cfg "namenode.principal"
-    let endpoint  = Endpoint <$> host <*> pure port
-        principal = join $ readPrincipal <$> prinStr <*> host
-    return $ flip NameNode principal <$> endpoint 
-
-getSocksProxy :: IO (Maybe SocksProxy)
-getSocksProxy = do
-    cfg   <- C.load [Optional configPath]
-    mhost <- C.lookup cfg "proxy.host"
-    case mhost of
-        Nothing   -> return Nothing
-        Just host -> Just . Endpoint host <$> C.lookupDefault 1080 cfg "proxy.port"
-
-------------------------------------------------------------------------
-
-workingDirConfigPath :: FilePath
-workingDirConfigPath = unsafePerformIO $ do
-    home <- getEnv "HOME"
-    return (home `FilePath.combine` ".hhwd")
-{-# NOINLINE workingDirConfigPath #-}
-
-getHomeDir :: MonadIO m => m HdfsPath
-getHomeDir = liftIO $ (("/user" </>) . T.encodeUtf8 . (udUser . hcUser)) <$> getConfig
-
-getWorkingDir :: MonadIO m => m HdfsPath
-getWorkingDir = liftIO $ handle onError
-                       $ B.takeWhile (/= '\n')
-                     <$> B.readFile workingDirConfigPath
-  where
-    onError :: SomeException -> IO HdfsPath
-    onError = const getHomeDir
-
-setWorkingDir :: MonadIO m => HdfsPath -> m ()
-setWorkingDir path = liftIO $ B.writeFile workingDirConfigPath
-                            $ path <> "\n"
-
-getAbsolute :: MonadIO m => HdfsPath -> m HdfsPath
-getAbsolute path = liftIO (normalizePath <$> getPath)
-  where
-    getPath = if "/" `B.isPrefixOf` path
-              then return path
-              else getWorkingDir >>= \pwd -> return (pwd </> path)
-
-normalizePath :: HdfsPath -> HdfsPath
-normalizePath = B.intercalate "/" . dropAbsParentDir . B.split '/'
-
-dropAbsParentDir :: [HdfsPath] -> [HdfsPath]
-dropAbsParentDir []       = error "dropAbsParentDir: not an absolute path"
-dropAbsParentDir (p : ps) = p : reverse (fst $ go [] ps)
-  where
-    go []       (".." : ys) = go [] ys
-    go (_ : xs) (".." : ys) = go xs ys
-    go xs       ("."  : ys) = go xs ys
-    go xs       (y    : ys) = go (y : xs) ys
-    go xs       []          = (xs, [])
-
-dropFileName :: HdfsPath -> HdfsPath
-dropFileName = B.pack . Posix.dropFileName . B.unpack
-
-takeFileName :: HdfsPath -> HdfsPath
-takeFileName = B.pack . Posix.takeFileName . B.unpack
 
 ------------------------------------------------------------------------
 
@@ -228,25 +98,16 @@ allSubCommands =
     , subVersion
     ]
 
-completePath :: Mod ArgumentFields a
-completePath = completer (fileCompletion (const True)) <> metavar "PATH"
-
-completeDir :: Mod ArgumentFields a
-completeDir  = completer (fileCompletion (== Dir)) <> metavar "DIRECTORY"
-
-bstr :: ReadM ByteString
-bstr = B.pack <$> str
-
 subCat :: SubCommand
 subCat = SubCommand "cat" "Print the contents of a file to stdout" go
   where
-    go = cat <$> many (argument bstr (completePath <> help "the file to cat"))
+    go = cat <$> many (hdfsPathArg $ help "the file to cat")
     cat paths = SubHdfs $ mapM_ (hdfsCat <=< getAbsolute) paths
 
 subChDir :: SubCommand
 subChDir = SubCommand "cd" "Change working directory" go
   where
-    go = cd <$> optional (argument bstr (completeDir <> help "the directory to change to"))
+    go = cd <$> optional (hdfsDirArg $ help "the directory to change to")
     cd mpath = SubHdfs $ do
         path <- getAbsolute =<< maybe getHomeDir return mpath
         _ <- getListingOrFail path
@@ -256,7 +117,7 @@ subChMod :: SubCommand
 subChMod = SubCommand "chmod" "Change permissions" go
   where
     go = chmod <$> argument bstr (help "permissions mode")
-               <*> argument bstr (completeDir <> help "the file/directory to chmod")
+               <*> hdfsPathArg (help "the file/directory to chmod")
     chmod modeS path = either
         (\_ -> error $ "Unknown mode" ++ B.unpack modeS)
         (\mode -> SubHdfs $ modifyPerms mode path)
@@ -310,7 +171,7 @@ subChOwn = SubCommand "chown" "Change ownership and/or group" go
 subDiskUsage :: SubCommand
 subDiskUsage = SubCommand "du" "Show the amount of space used by file or directory" go
   where
-    go = du <$> optional (argument bstr (completePath <> help "the file/directory to check the usage of"))
+    go = du <$> optional (hdfsPathArg $ help "the file/directory to check the usage of")
     du path = SubHdfs $ printDiskUsage =<< getAbsolute (fromMaybe "" path)
 
 timeArg :: ReadM (Ordering, NominalDiffTime)
@@ -349,7 +210,7 @@ timeArg = do
 subFind :: SubCommand
 subFind = SubCommand "find" "Recursively search a directory tree" go
   where
-    go = find <$> optional (argument bstr (completeDir <> help "the path to recursively search"))
+    go = find <$> optional (hdfsDirArg $ help "the path to recursively search")
               <*> optional (option bstr (long "name" <> metavar "FILENAME"
                                                      <> help "the file name to match"))
               <*> optional (option timeArg (long "atime" <> metavar "n[smhdw]"
@@ -386,7 +247,7 @@ subFind = SubCommand "find" "Recursively search a directory tree" go
 subGet :: SubCommand
 subGet = SubCommand "get" "Get a file" go
   where
-    go = get <$> argument bstr (completePath <> help "source file")
+    go = get <$> hdfsPathArg (help "source file")
              <*> optional (argument str (completePath <> help "destination file"))
     get src mdst = SubHdfs $ do
       let dst = fromMaybe (Posix.takeFileName $ B.unpack src) mdst
@@ -399,14 +260,14 @@ subGet = SubCommand "get" "Get a file" go
 subList :: SubCommand
 subList = SubCommand "ls" "List the contents of a directory" go
   where
-    go = ls <$> optional (argument bstr (completePath <> help "the directory to list"))
+    go = ls <$> optional (hdfsPathArg $ help "the directory to list")
     ls path = SubHdfs $ printListing =<< getAbsolute (fromMaybe "" path)
 
 subMkDir :: SubCommand
 subMkDir = SubCommand "mkdir" "Create a directory in the specified location" go
   where
-    go = mkdir <$> argument bstr (completeDir <> help "the directory to create")
-               <*> switch        (short 'p' <> help "create intermediate directories")
+    go = mkdir <$> hdfsDirArg (help "the directory to create")
+               <*> switch (short 'p' <> help "create intermediate directories")
     mkdir path parent = SubHdfs $ do
       absPath <- getAbsolute path
       ok <- mkdirs parent absPath
@@ -420,9 +281,9 @@ subPwd = SubCommand "pwd" "Print working directory" go
 subRemove :: SubCommand
 subRemove = SubCommand "rm" "Delete a file or directory" go
   where
-    go = rm <$> argument bstr (completePath <> help "the file/directory to remove")
-            <*> switch        (short 'r' <> help "recursively remove the whole file hierarchy")
-            <*> switch        (short 's' <> long "skipTrash" <> help "immediately delete, bypassing trash")
+    go = rm <$> hdfsPathArg (help "the file/directory to remove")
+            <*> switch      (short 'r' <> help "recursively remove the whole file hierarchy")
+            <*> switch      (short 's' <> long "skipTrash" <> help "immediately delete, bypassing trash")
     rm path recursive skipTrash = SubHdfs $ do
       absPath <- getAbsolute path
       if skipTrash || ".Trash" `elem` B.split '/' absPath
@@ -441,9 +302,9 @@ subRemove = SubCommand "rm" "Delete a file or directory" go
 subRename :: SubCommand
 subRename = SubCommand "mv" "Rename a file or directory" go
   where
-    go = mv <$> argument bstr (completePath <> help "source file/directory")
-            <*> argument bstr (completePath <> help "destination file/directory")
-            <*> switch        (short 'f' <> help "overwrite destination if it exists")
+    go = mv <$> hdfsPathArg (help "source file/directory")
+            <*> hdfsPathArg (help "destination file/directory")
+            <*> switch      (short 'f' <> help "overwrite destination if it exists")
     mv src dst force = SubHdfs $ do
       absSrc <- getAbsolute src
       absDst <- getAbsolute dst
@@ -457,15 +318,15 @@ subRename = SubCommand "mv" "Rename a file or directory" go
 subTest :: SubCommand
 subTest = SubCommand "test" "If file exists, has zero length, is a directory then return 0, else return 1" go
   where
-    go = test <$> argument bstr (completePath <> help "file/directory")
-               <*> switch        (short 'e' <> help "Test exists")
-               <*> switch        (short 'z' <> help "Test is zero length")
-               <*> switch        (short 'd' <> help "Test is a directory")
-               <*> switch        (short 'f' <> help "Test is a regular file")
-               <*> switch        (short 'l' <> help "Test is a symbolic link")
-               <*> switch        (short 'r' <> help "Test read permission is granted")
-               <*> switch        (short 'w' <> help "Test write permission is granted")
-               <*> switch        (short 'x' <> help "Test exectute permission is granted")
+    go = test <$> hdfsPathArg (help "file/directory")
+              <*> switch      (short 'e' <> help "Test exists")
+              <*> switch      (short 'z' <> help "Test is zero length")
+              <*> switch      (short 'd' <> help "Test is a directory")
+              <*> switch      (short 'f' <> help "Test is a regular file")
+              <*> switch      (short 'l' <> help "Test is a symbolic link")
+              <*> switch      (short 'r' <> help "Test read permission is granted")
+              <*> switch      (short 'w' <> help "Test write permission is granted")
+              <*> switch      (short 'x' <> help "Test exectute permission is granted")
     test path _e z d f l r w x = SubHdfs $ do
         absPath <- getAbsolute path
         minfo <- getFileInfo absPath
@@ -489,15 +350,15 @@ subTest = SubCommand "test" "If file exists, has zero length, is a directory the
 subTestNewer :: SubCommand
 subTestNewer = SubCommand "test-newer" "file1 is newer (modification time) than file2" go
   where
-    go = testNewer <$> argument bstr (completePath <> help "file/directory")
-                   <*> argument bstr (completePath <> help "file/directory")
+    go = testNewer <$> hdfsPathArg (help "file/directory")
+                   <*> hdfsPathArg (help "file/directory")
                    <*> pure False
 
 subTestOlder :: SubCommand
 subTestOlder = SubCommand "test-older" "file1 is older (modification time) than file2" go
   where
-    go = testNewer <$> argument bstr (completePath <> help "file/directory")
-                   <*> argument bstr (completePath <> help "file/directory")
+    go = testNewer <$> hdfsPathArg (help "file/directory")
+                   <*> hdfsPathArg (help "file/directory")
                    <*> pure True
 
 testNewer :: HdfsPath -> HdfsPath -> Bool -> SubMethod
@@ -519,37 +380,6 @@ subVersion :: SubCommand
 subVersion = SubCommand "version" "Show version information" go
   where
     go = pure $ SubIO $ putStrLn $ "hh version " <> showVersion version
-
-------------------------------------------------------------------------
-
-fileCompletion :: (FileType -> Bool) -> Completer
-fileCompletion p = mkCompleter $ \strPath -> handle ignore $ runHdfs $ do
-    let path = B.pack strPath
-        dir  = takeParent path
-
-    ls <- getListing' =<< getAbsolute dir
-
-    return $ V.toList
-           . V.map B.unpack
-           . V.filter (path `B.isPrefixOf`)
-           . V.map (displayPath dir)
-           . V.filter (p . fsFileType)
-           $ ls
-  where
-    ignore (RemoteError _ _) = return []
-
-takeParent :: HdfsPath -> HdfsPath
-takeParent bs = case B.elemIndexEnd '/' bs of
-    Nothing -> B.empty
-    Just 0  -> "/"
-    Just ix -> B.take ix bs
-
-displayPath :: HdfsPath -> FileStatus -> HdfsPath
-displayPath parent file = parent </> fsPath file <> suffix
-  where
-    suffix = case fsFileType file of
-        Dir -> "/"
-        _   -> ""
 
 ------------------------------------------------------------------------
 
@@ -668,24 +498,6 @@ formatPermission perms = format (perms `shiftR` 6)
 
 ------------------------------------------------------------------------
 
-printError :: RemoteError -> IO ()
-printError (RemoteError subject body)
-    | oneLiner    = T.hPutStrLn stderr firstLine
-    | T.null body = T.hPutStrLn stderr subject
-    | otherwise   = T.hPutStrLn stderr subject >> T.putStrLn body
-  where
-    oneLiner  = subject `elem` [ "org.apache.hadoop.security.AccessControlException"
-                               , "org.apache.hadoop.fs.FileAlreadyExistsException"
-                               , "java.io.FileNotFoundException" ]
-    firstLine = T.takeWhile (/= '\n') body
-
-isAccessDenied :: RemoteError -> Bool
-isAccessDenied (RemoteError s _) = s == "org.apache.hadoop.security.AccessControlException"
-
-isStandbyError :: RemoteError -> Bool
-isStandbyError (RemoteError s _) = s == "org.apache.hadoop.ipc.StandbyException"
-
-------------------------------------------------------------------------
 
 getListingOrFail :: HdfsPath -> Hdfs (V.Vector FileStatus)
 getListingOrFail path = do
@@ -693,3 +505,4 @@ getListingOrFail path = do
     case mls of
       Nothing -> throwM $ RemoteError ("File/directory does not exist: " <> T.decodeUtf8 path) T.empty
       Just ls -> return ls
+
