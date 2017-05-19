@@ -134,6 +134,24 @@ instance Decode SetPermissionResponse
 
 ------------------------------------------------------------------------
 
+data SetOwnerRequest = SetOwnerRequest
+    { chownPath  :: Required 1 (Value Text)
+    , chownUser  :: Optional 2 (Value Text)
+    , chownGroup :: Optional 3 (Value Text)
+    } deriving (Generic, Show)
+
+instance Encode SetOwnerRequest
+instance Decode SetOwnerRequest
+
+data SetOwnerResponse = SetOwnerResponse
+    {
+    } deriving (Generic, Show)
+
+instance Encode SetOwnerResponse
+instance Decode SetOwnerResponse
+
+------------------------------------------------------------------------
+
 data GetBlockLocationsRequest = GetBlockLocationsRequest
     { catSrc    :: Required 1 (Value Text)
     , catOffset :: Required 2 (Value Int64)
