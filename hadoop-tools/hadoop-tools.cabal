@@ -75,7 +75,7 @@ test-suite test
   type:
     exitcode-stdio-1.0
   hs-source-dirs:
-    tests,src
+    test,src
   main-is:
     test.hs
   build-depends:
