@@ -1,4 +1,4 @@
-# Hadoop Tools [![Hackage version](https://img.shields.io/hackage/v/hadoop-tools.svg?style=flat)](http://hackage.haskell.org/package/hadoop-tools) [![Build Status](http://img.shields.io/circleci/project/jystic/hadoop-tools.svg?style=flat)](https://circleci.com/gh/jystic/hadoop-tools)
+# Hadoop Tools [![Hackage][hackage-shield]][hackage] [![Travis][travis-shield]][travis] [![Circle CI][circleci-shield]][circleci]
 
 Tools for working with Hadoop written with performance in mind.
 
@@ -100,3 +100,12 @@ auth {
 
 If you don't provide an `auth.user` field it will assume it is the same as
 your `hdfs.user` field, which is probably not what you want.
+
+ [hackage]: http://hackage.haskell.org/package/hadoop-tools
+ [hackage-shield]: http://img.shields.io/hackage/v/hadoop-tools.svg?style=flat
+
+ [travis]: https://travis-ci.org/jystic/hadoop-tools
+ [travis-shield]: https://travis-ci.org/jystic/hadoop-tools.svg?branch=master
+
+ [circleci]: https://circleci.com/gh/jystic/hadoop-tools
+ [circleci-shield]: http://img.shields.io/circleci/project/jystic/hadoop-tools.svg?style=flat
