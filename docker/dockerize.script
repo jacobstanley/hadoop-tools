@@ -22,9 +22,8 @@ ls -l /var/cache/yum
 mkdir -p ${CACHE}/cabal
 ln -s ${CACHE}/cabal /root/.cabal
 
-mkdir -p /root/.ambiata
 mkdir -p ${CACHE}/mafia
-ln -s ${CACHE}/mafia /root/.ambiata/mafia
+ln -s ${CACHE}/mafia /root/.mafia
 
 # Dependencies
 cat /etc/yum.conf | grep -v keepcache > /etc/yum.conf.new
@@ -34,42 +33,40 @@ yum install -y epel-release rpmdevtools tar git || true
 yum install -y libgsasl-devel
 
 # Working directory
-mkdir -p ${WORKDIR_RW}
-cp    ${WORKDIR}/*.cabal     ${WORKDIR_RW}/
-cp    ${WORKDIR}/*.spec      ${WORKDIR_RW}/
-cp    ${WORKDIR}/*.bash      ${WORKDIR_RW}/
-cp    ${WORKDIR}/Setup.hs    ${WORKDIR_RW}/
-cp    ${WORKDIR}/LICENSE     ${WORKDIR_RW}/
-cp    ${WORKDIR}/mafia       ${WORKDIR_RW}/
-cp    ${WORKDIR}/.gitmodules ${WORKDIR_RW}/
-cp -r ${WORKDIR}/.git        ${WORKDIR_RW}/
-cp -r ${WORKDIR}/lib         ${WORKDIR_RW}/
-cp -r ${WORKDIR}/src         ${WORKDIR_RW}/
-cp -r ${WORKDIR}/tests       ${WORKDIR_RW}/
+mkdir -p /src
+rsync -av ${WORKDIR} /src \
+  --exclude hadoop-rpc/.cabal-sandbox/ \
+  --exclude hadoop-rpc/dist/ \
+  --exclude hadoop-tools/.cabal-sandbox/ \
+  --exclude hadoop-tools/dist/ \
+  --exclude docker
+
 cd ${WORKDIR_RW}
 
 # Build hh
 ghc-pkg recache
-./mafia update
-./mafia build
-./mafia testci
+bin/travis_install
+bin/travis_script
+
+HADOOP_TOOLS=${WORKDIR_RW}/hadoop-tools
 
 # Run hh
-${WORKDIR_RW}/dist/build/hh/hh --help
+${HADOOP_TOOLS}/dist/build/hh/hh --help
 
 # Create RPM Tree
+cd ${HADOOP_TOOLS}
 rpmdev-setuptree
 
 # Bundle "sources" in to a tarball
 cd /root/rpmbuild
 mkdir -p hadoop-tools-1.0/usr/bin/
 mkdir -p hadoop-tools-1.0/etc/bash_completion.d/
-install -m 755 ${WORKDIR_RW}/dist/build/hh/hh hadoop-tools-1.0/usr/bin/
-install -m 755 ${WORKDIR_RW}/hh-completion.bash hadoop-tools-1.0/etc/bash_completion.d/
+install -m 755 ${HADOOP_TOOLS}/dist/build/hh/hh hadoop-tools-1.0/usr/bin/
+install -m 755 ${HADOOP_TOOLS}/hh-completion.bash hadoop-tools-1.0/etc/bash_completion.d/
 tar -zcvf SOURCES/hadoop-tools-1.0.tar.gz hadoop-tools-1.0/
 
 # Build RPM
-cp /src/hadoop-tools/hadoop-tools.spec SPECS/
+cp ${HADOOP_TOOLS}/hadoop-tools.spec SPECS/
 rpmbuild -ba SPECS/hadoop-tools.spec
 
 # Install RPM
@@ -79,5 +76,5 @@ yum install -y RPMS/x86_64/*.rpm
 hh --help
 
 # Copy Output
-cp ${WORKDIR_RW}/dist/build/hh/hh /dist/
-cp /root/rpmbuild/RPMS/x86_64/*   /dist/
+cp ${WORKDIR_RW}/hadoop-tools/dist/build/hh/hh /dist/
+cp /root/rpmbuild/RPMS/x86_64/* /dist/
