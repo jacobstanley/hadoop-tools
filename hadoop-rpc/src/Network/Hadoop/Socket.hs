@@ -23,7 +23,7 @@ connectSocket Nothing      = connectDirect
 connectSocket (Just proxy) = connectSocks proxy
 
 closeSocket :: MonadIO m => S.Socket -> m ()
-closeSocket = liftIO . S.sClose
+closeSocket = liftIO . S.close
 
 ------------------------------------------------------------------------
 
