@@ -1,0 +1,91 @@
+name:          hadoop-rpc
+version:       1.1.0.0
+
+synopsis:
+  Use the Hadoop RPC interface from Haskell.
+
+description:
+  Use the Hadoop RPC interface from Haskell.
+  .
+  This version only supports v9 of the RPC protocol (CDH 5.x and above).
+  .
+  Use hadoop-rpc-0.x.x.x if you need v7 support.
+  .
+  /The API is still evolving and is highly likely to change in the future./
+
+homepage:      http://github.com/jystic/hadoop-rpc
+license:       Apache-2.0
+license-file:  LICENSE
+author:        Jacob Stanley, Conrad Parker, Luke Clifton
+maintainer:    Jacob Stanley <jacob@stanley.io>
+category:      Data
+build-type:    Simple
+cabal-version: >= 1.10
+
+library
+  hs-source-dirs: src
+  default-language: Haskell2010
+
+  ghc-options: -funbox-strict-fields -Wall
+
+  exposed-modules:
+    Data.Hadoop.Configuration
+    Data.Hadoop.HdfsPath
+    Data.Hadoop.Protobuf.ClientNameNode
+    Data.Hadoop.Protobuf.DataTransfer
+    Data.Hadoop.Protobuf.Hdfs
+    Data.Hadoop.Protobuf.Headers
+    Data.Hadoop.Protobuf.ProtocolInfo
+    Data.Hadoop.Protobuf.Security
+    Data.Hadoop.Types
+    Network.Hadoop.Hdfs
+    Network.Hadoop.Read
+    Network.Hadoop.Rpc
+    Network.Hadoop.Sasl
+    Network.Hadoop.Socket
+    Network.Hadoop.Stream
+    Network.Hadoop.Types
+
+  build-depends:
+      base                 >= 4.7 && < 5
+    , attoparsec           >= 0.12
+    , bytestring           >= 0.10
+    , cereal               >= 0.4
+    , exceptions           >= 0.6
+    , gsasl                >= 0.3.6
+    , hashable             >= 1.2.1
+    , monad-loops          >= 0.4
+    , network              >= 2.5
+    , protobuf             >= 0.2.0.4
+    , random               >= 1.0.1.1
+    , socks                >= 0.5
+    , stm                  >= 2.4
+    , text                 >= 1.1
+    , transformers         >= 0.3
+    , unix                 >= 2.7
+    , unordered-containers >= 0.2
+    , uuid                 >= 1.3.4
+    , vector               >= 0.10
+    , xmlhtml              >= 0.2
+
+flag travis
+  description: Travis CI can't run some tests that depend on HDFS being present,
+               so this flag disables those.
+  default: False
+
+test-suite hdfs-tests
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs: test
+  default-language: Haskell2010
+
+  if flag(travis)
+    buildable: False
+
+  build-depends:
+      base        >= 4.7 && < 5
+    , hadoop-rpc
+    , protobuf
+    , tasty
+    , tasty-hunit >= 0.9
+    , vector
