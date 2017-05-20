@@ -30,6 +30,9 @@ library
 
   if impl(ghc < 7.10)
     ghc-options: -fcontext-stack=37
+  if impl(ghc >= 8.0)
+    -- FIXME remove when 7.8.4 support is dropped
+    ghc-options: -fno-warn-redundant-constraints
 
   exposed-modules:
     Data.Hadoop.Configuration
