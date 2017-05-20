@@ -28,6 +28,9 @@ library
 
   ghc-options: -funbox-strict-fields -Wall
 
+  if impl(ghc < 7.10)
+    ghc-options: -fcontext-stack=37
+
   exposed-modules:
     Data.Hadoop.Configuration
     Data.Hadoop.HdfsPath

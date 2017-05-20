@@ -1,6 +1,5 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
-{-# OPTIONS_GHC -fcontext-stack=37 #-}
 
 -- | This module contains protocol buffers that are used to transfer data
 -- to and from the datanode, as well as between datanodes.

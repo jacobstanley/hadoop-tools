@@ -1,6 +1,5 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
-{-# OPTIONS_GHC -fcontext-stack=37 #-}
 
 module Data.Hadoop.Protobuf.ClientNameNode where
 
