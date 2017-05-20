@@ -8,5 +8,5 @@ PACKAGES=$(echo $PWD/*/*.cabal | xargs -n1 dirname)
 for PACKAGE in $PACKAGES; do
     cd $PACKAGE
     $ROOT/bin/mafia build
-    $ROOT/bin/mafia testci
+    $ROOT/bin/mafia testci -ftravis
 done
