@@ -6,6 +6,7 @@ CACHE=/var/cache/dockerize
 WORKDIR=/var/hadoop-tools
 WORKDIR_RW=/src/hadoop-tools
 VOLUME="${PWD}/docker/cache:${CACHE} ${PWD}:${WORKDIR}:ro ${OUTPUT}:/dist"
+HADOOP_TOOLS=${WORKDIR_RW}/hadoop-tools
 #!/bin/sh
 set -e
 set -x
@@ -47,8 +48,6 @@ cd ${WORKDIR_RW}
 ghc-pkg recache
 bin/travis_install
 bin/travis_script
-
-HADOOP_TOOLS=${WORKDIR_RW}/hadoop-tools
 
 # Run hh
 ${HADOOP_TOOLS}/dist/build/hh/hh --help
