@@ -4,6 +4,7 @@
 
 module Main (main) where
 
+import           Control.Applicative
 import           Control.Concurrent.STM
 import           Control.Exception (SomeException, throwIO, fromException)
 import           Control.Monad
@@ -29,6 +30,7 @@ import qualified Data.Configurator as C
 import           Data.Configurator.Types (Worth(..))
 
 import           Options.Applicative hiding (Success)
+import           Options.Applicative.Types (readerAsk)
 
 import           System.Environment (getEnv)
 import           System.Exit (exitFailure)
@@ -311,22 +313,75 @@ subDiskUsage = SubCommand "du" "Show the amount of space used by file or directo
     go = du <$> optional (argument bstr (completePath <> help "the file/directory to check the usage of"))
     du path = SubHdfs $ printDiskUsage =<< getAbsolute (fromMaybe "" path)
 
+timeArg :: ReadM (Ordering, NominalDiffTime)
+timeArg = do
+    res <- Atto.parseOnly parseTimeArg . B.pack <$> readerAsk
+    case res of
+        Right t -> return t
+        Left s -> readerError $ "could't parse duration argument: " ++ s
+  where
+    parseTimeArg :: Atto.Parser (Ordering, NominalDiffTime)
+    parseTimeArg = do
+        rel <- Atto.choice
+            [ Atto.char '-' *> pure LT
+            , Atto.char '+' *> pure GT
+            , pure EQ
+            ]
+        len <- Atto.choice [parseDuration] Atto.<?> "Expected a duration such as 1h30m"
+        Atto.endOfInput Atto.<?> "malformed time format"
+        return (rel, len)
+
+    parseDuration = do
+        durs <- some parseSegment
+        return $ sum durs
+
+    parseSegment = do
+        d <- Atto.decimal
+        mul <- Atto.choice
+            [ Atto.char 's' *> pure (1 :: Int)
+            , Atto.char 'm' *> pure 60
+            , Atto.char 'h' *> pure 3600
+            , Atto.char 'd' *> pure 86400
+            , Atto.char 'w' *> pure 604800
+            ]
+        return $ fromIntegral (d * mul)
+
 subFind :: SubCommand
 subFind = SubCommand "find" "Recursively search a directory tree" go
   where
     go = find <$> optional (argument bstr (completeDir <> help "the path to recursively search"))
               <*> optional (option bstr (long "name" <> metavar "FILENAME"
                                                      <> help "the file name to match"))
-    find mpath mexpr = SubHdfs $ do
+              <*> optional (option timeArg (long "atime" <> metavar "n[smhdw]"
+                                                         <> help "access time query"))
+              <*> optional (option timeArg (long "mtime" <> metavar "n[smhdw]"
+                                                         <> help "modification time query"))
+    find mpath mexpr atime mtime = SubHdfs $ do
         _ <- getFileInfo "/"
         matcher <- liftIO (mkMatcher mexpr)
-        printFindResults (fromMaybe "" mpath) matcher
+        atimeP <- liftIO (timePredicate fsAccessTime atime)
+        mtimeP <- liftIO (timePredicate fsModificationTime mtime)
+        printFindResults (fromMaybe "" mpath) $ allPreds
+            [ matcher
+            , atimeP
+            , mtimeP
+            ]
+
+    allPreds :: [FileStatus -> Bool] -> FileStatus -> Bool
+    allPreds preds fs = and $ map ($ fs) preds
 
     mkMatcher :: Maybe ByteString -> IO (FileStatus -> Bool)
     mkMatcher Nothing     = return (const True)
     mkMatcher (Just expr) = do
         glob <- Glob.compile expr
         return (Glob.matches glob . fsPath)
+
+    timePredicate :: (FileStatus -> HdfsTime) -> Maybe (Ordering, NominalDiffTime) -> IO (FileStatus -> Bool)
+    timePredicate _ Nothing  = return (const True)
+    timePredicate sel (Just (rel, n)) = do
+        cur <- getCurrentTime
+        return $ \f ->
+            compare (diffUTCTime cur (hdfs2utc (sel f))) n == rel
 
 subGet :: SubCommand
 subGet = SubCommand "get" "Get a file" go
@@ -513,12 +568,14 @@ printDiskUsage path = do
     getDirSize f = handle (\e -> if isAccessDenied e then return "-" else throwM e)
                           (formatSize . csLength <$> getContentSummary f)
 
+hdfs2utc :: HdfsTime -> UTCTime
+hdfs2utc ms = posixSecondsToUTCTime (fromIntegral ms / 1000)
+
 printListing :: HdfsPath -> Hdfs ()
 printListing path = do
     ls <- getListingOrFail path
 
-    let hdfs2utc ms  = posixSecondsToUTCTime (fromIntegral ms / 1000)
-        getModTime   = hdfs2utc . fsModificationTime
+    let getModTime   = hdfs2utc . fsModificationTime
 
         col a f = vcat a (map (text . f) (V.toList ls))
 
