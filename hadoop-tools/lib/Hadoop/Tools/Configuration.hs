@@ -7,7 +7,6 @@ module Hadoop.Tools.Configuration
 
 import           Control.Monad
 
-import qualified Data.Text as T
 import qualified Data.Configurator as C
 import           Data.Configurator.Types (Worth(..))
 
