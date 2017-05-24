@@ -46,7 +46,7 @@ newSocket addr = liftIO $ S.socket (S.addrFamily addr)
 
 ------------------------------------------------------------------------
 
-connectSocks :: (MonadMask m, MonadIO m) => SocksProxy -> Endpoint -> m S.Socket
+connectSocks :: (MonadIO m) => SocksProxy -> Endpoint -> m S.Socket
 connectSocks proxy endpoint = liftIO (socksConnectWith proxyConf host port)
   where
     proxyConf = defaultSocksConf (T.unpack $ epHost proxy)
