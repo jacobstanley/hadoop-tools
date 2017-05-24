@@ -505,4 +505,3 @@ getListingOrFail path = do
     case mls of
       Nothing -> throwM $ RemoteError ("File/directory does not exist: " <> T.decodeUtf8 path) T.empty
       Just ls -> return ls
-

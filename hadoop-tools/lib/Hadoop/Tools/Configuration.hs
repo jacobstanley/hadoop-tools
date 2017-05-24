@@ -66,7 +66,7 @@ getNameNode = do
     prinStr <- C.lookup cfg "namenode.principal"
     let endpoint  = Endpoint <$> host <*> pure port
         principal = join $ readPrincipal <$> prinStr <*> host
-    return $ flip NameNode principal <$> endpoint 
+    return $ flip NameNode principal <$> endpoint
 
 getSocksProxy :: IO (Maybe SocksProxy)
 getSocksProxy = do
