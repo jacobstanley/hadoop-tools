@@ -1,7 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-module Hadoop.Tools.Configuration where
+module Hadoop.Tools.Configuration
+    ( getConfig
+    ) where
 
 import           Control.Monad
 
@@ -12,7 +14,6 @@ import           Data.Configurator.Types (Worth(..))
 import           System.Environment (getEnv)
 import qualified System.FilePath as FilePath
 import           System.IO.Unsafe (unsafePerformIO)
-import           System.Posix.User (GroupEntry(..), getGroups, getGroupEntryForID)
 
 
 import           Data.Hadoop.Configuration (getHadoopConfig, readPrincipal)
@@ -49,14 +50,7 @@ getHdfsUser = do
     udAuthUser <- C.lookup cfg "auth.user"
     return $ UserDetails <$> udUser <*> pure udAuthUser
 
-
 -- getHdfsUser = C.load [Optional configPath] >>= flip C.lookup "hdfs.user"
-
-getGroupNames :: IO [Group]
-getGroupNames = do
-    groups <- getGroups
-    entries <- mapM getGroupEntryForID groups
-    return $ map (T.pack . groupName) entries
 
 getNameNode :: IO (Maybe NameNode)
 getNameNode = do

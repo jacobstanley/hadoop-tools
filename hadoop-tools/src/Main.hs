@@ -29,8 +29,9 @@ import           Data.Word (Word16, Word64)
 import           Options.Applicative hiding (Success)
 import           Options.Applicative.Types (readerAsk)
 
-import qualified System.FilePath.Posix as Posix
 import           System.IO
+import           System.Posix.User (GroupEntry(..), getGroups, getGroupEntryForID)
+import qualified System.FilePath.Posix as Posix
 
 import           Text.PrettyPrint.Boxes hiding ((<>), (//))
 
@@ -45,9 +46,9 @@ import qualified Glob
 
 import           Paths_hadoop_tools (version)
 
-import Hadoop.Tools.Run
-import Hadoop.Tools.Options
-import Hadoop.Tools.Configuration
+import           Hadoop.Tools.Options
+import           Hadoop.Tools.Path
+import           Hadoop.Tools.Run
 
 ------------------------------------------------------------------------
 
@@ -346,6 +347,12 @@ subTest = SubCommand "test" "If file exists, has zero length, is a directory the
         hasPerm user groups FileStatus{..} p = (fsOwner == user && (fsPermission .&. (p `shiftL` 6)) /= 0) ||
                                                (fsGroup `elem` groups && (fsPermission .&. (p `shiftL` 3)) /= 0) ||
                                                ((fsPermission .&. p) /= 0)
+
+getGroupNames :: IO [Group]
+getGroupNames = do
+    groups <- getGroups
+    entries <- mapM getGroupEntryForID groups
+    return $ map (T.pack . groupName) entries
 
 subTestNewer :: SubCommand
 subTestNewer = SubCommand "test-newer" "file1 is newer (modification time) than file2" go

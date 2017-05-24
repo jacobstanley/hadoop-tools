@@ -46,6 +46,7 @@ library
   exposed-modules:
     Hadoop.Tools.Configuration
     Hadoop.Tools.Options
+    Hadoop.Tools.Path
     Hadoop.Tools.Run
 
   build-depends:
