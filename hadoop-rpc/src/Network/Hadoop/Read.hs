@@ -96,11 +96,11 @@ hdfsCat path = do
     maybe (return ()) (hdfsMapM_ (liftIO . B.putStr)) h
 
 -- | Map an action over the contents of a file on HDFS.
-hdfsMapM_ :: (Functor m, MonadIO m, MonadMask m) =>
+hdfsMapM_ :: (MonadIO m, MonadMask m) =>
     (ByteString -> m ()) -> HdfsReadHandle -> m ()
 hdfsMapM_ f = hdfsFoldM (\_ x -> f x) ()
 
-hdfsFoldM :: (Functor m, MonadIO m, MonadMask m) =>
+hdfsFoldM :: (MonadIO m, MonadMask m) =>
     (a -> ByteString -> m a) -> a -> HdfsReadHandle -> m a
 hdfsFoldM f acc0 (HdfsReadHandle proxy l) = do
         let len = getField . lbFileLength $ l
