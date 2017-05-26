@@ -7,6 +7,7 @@ module Hadoop.Tools.Options
     , bstr
     , hdfsPathArg
     , hdfsDirArg
+    , HdfsPath
     ) where
 
 import           Control.Monad.Catch (handle)
