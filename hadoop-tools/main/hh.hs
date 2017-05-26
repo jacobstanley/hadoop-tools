@@ -41,12 +41,11 @@ import           Data.Hadoop.Types
 import           Network.Hadoop.Hdfs hiding (runHdfs)
 import           Network.Hadoop.Read
 
-import           Chmod
-import qualified Glob
-
 import           Paths_hadoop_tools (version)
 
 import           Hadoop.Tools.Options
+import qualified Hadoop.Tools.Options.Glob as Glob
+import           Hadoop.Tools.Options.Chmod
 import           Hadoop.Tools.Path
 import           Hadoop.Tools.Run
 
