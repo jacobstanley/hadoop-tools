@@ -1,4 +1,4 @@
-module Chmod (
+module Hadoop.Tools.Options.Chmod (
       Chmod(..)
     , ChmodWho(..)
     , ChmodWhat(..)

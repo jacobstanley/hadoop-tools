@@ -14,7 +14,7 @@ import           Data.Word (Word16, Word32)
 
 import           Data.Hadoop.Types (FileType(..))
 
-import           Chmod
+import           Hadoop.Tools.Options.Chmod
 
 ------------------------------------------------------------
 

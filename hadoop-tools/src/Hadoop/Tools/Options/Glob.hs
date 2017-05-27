@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Glob
+module Hadoop.Tools.Options.Glob
     ( Glob
     , compile
     , matches
