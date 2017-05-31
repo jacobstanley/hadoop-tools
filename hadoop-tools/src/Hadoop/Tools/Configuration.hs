@@ -23,10 +23,12 @@ import           Data.Hadoop.Types
 getConfig :: IO HadoopConfig
 getConfig = do
     hdfsUser   <- getHdfsUser
+    authUser   <- getAuthUser
     nameNode   <- getNameNode
     socksProxy <- getSocksProxy
 
-    liftM ( set hdfsUser   (\c x -> c { hcUser      = x })
+    liftM ( set hdfsUser   (\c@HadoopConfig{..} x -> c { hcUser = hcUser { udUser = x }})
+          . set authUser   (\c@HadoopConfig{..} x -> c { hcUser = hcUser { udAuthUser = Just x }})
           . set nameNode   (\c x -> c { hcNameNodes = [x] })
           . set socksProxy (\c x -> c { hcProxy     = Just x })
           ) getHadoopConfig
@@ -42,12 +44,15 @@ configPath = unsafePerformIO $ do
     return (home `FilePath.combine` ".hh")
 {-# NOINLINE configPath #-}
 
-getHdfsUser :: IO (Maybe UserDetails)
+getHdfsUser :: IO (Maybe User)
 getHdfsUser = do
     cfg <- C.load [Optional configPath]
-    udUser <- C.lookup cfg "hdfs.user"
-    udAuthUser <- C.lookup cfg "auth.user"
-    return $ UserDetails <$> udUser <*> pure udAuthUser
+    C.lookup cfg "hdfs.user"
+
+getAuthUser :: IO (Maybe User)
+getAuthUser = do
+    cfg <- C.load [Optional configPath]
+    C.lookup cfg "auth.user"
 
 -- getHdfsUser = C.load [Optional configPath] >>= flip C.lookup "hdfs.user"
 
