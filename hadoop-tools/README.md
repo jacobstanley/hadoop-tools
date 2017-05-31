@@ -84,12 +84,12 @@ proxy {
 ### Kerberos / SASL
 
 In order to use Kerberos authentication you must supply information about
-the `principal` for both your user and your namenode.
+the `principal` for both your user and your namenode. These are looked up
+in `/etc/hadoop/conf/core-site.xml` and `/etc/hadoop/conf/hdfs-site.xml` by
+default.
 
 ```config
 namenode {
-  host = "hostname or ip address"
-  port = 7020 # defaults to 8020
   principal = "hdfs/hostname@REALM.COM"
 }
 
@@ -98,8 +98,9 @@ auth {
 }
 ```
 
-If you don't provide an `auth.user` field it will assume it is the same as
-your `hdfs.user` field, which is probably not what you want.
+If you don't provide an `auth.user` field it will assume it is
+`hdfs.user@REALM.COM`, where `REALM.COM` cames from the principal of
+one of the namenodes.
 
  [hackage]: http://hackage.haskell.org/package/hadoop-tools
  [hackage-shield]: http://img.shields.io/hackage/v/hadoop-tools.svg?style=flat
