@@ -5,10 +5,12 @@ module Hadoop.Tools.Configuration
     ( getConfig
     ) where
 
+import           Control.Applicative ((<|>))
 import           Control.Monad
 
 import qualified Data.Configurator as C
 import           Data.Configurator.Types (Worth(..))
+import           Data.Monoid ((<>))
 
 import           System.Environment (getEnv)
 import qualified System.FilePath as FilePath
@@ -27,7 +29,8 @@ getConfig = do
     nameNode   <- getNameNode
     socksProxy <- getSocksProxy
 
-    liftM ( set hdfsUser   (\c@HadoopConfig{..} x -> c { hcUser = hcUser { udUser = x }})
+    liftM ( setFallbackAuth
+          . set hdfsUser   (\c@HadoopConfig{..} x -> c { hcUser = hcUser { udUser = x }})
           . set authUser   (\c@HadoopConfig{..} x -> c { hcUser = hcUser { udAuthUser = Just x }})
           . set nameNode   (\c x -> c { hcNameNodes = [x] })
           . set socksProxy (\c x -> c { hcProxy     = Just x })
@@ -35,6 +38,23 @@ getConfig = do
   where
     set :: Maybe a -> (b -> a -> b) -> b -> b
     set m f c = maybe c (f c) m
+
+    -- Derive an username for authentication based on the currently set
+    -- hdfs username and the principal used by the name node.
+    fallbackAuth :: User -> NameNode -> Maybe User
+    fallbackAuth user nameNode =
+        case nnPrincipal nameNode of
+            Nothing -> Nothing
+            Just (Principal{..}) -> Just $ user <> "@" <> pRealm
+
+    setFallbackAuth :: HadoopConfig -> HadoopConfig
+    setFallbackAuth c@HadoopConfig{..} =
+        let
+            fb = case hcNameNodes of
+                nn:_ -> fallbackAuth (udUser hcUser) nn
+                _ -> Nothing
+            user = hcUser { udAuthUser = udAuthUser hcUser <|> fb }
+        in c { hcUser = user }
 
 ------------------------------------------------------------------------
 
