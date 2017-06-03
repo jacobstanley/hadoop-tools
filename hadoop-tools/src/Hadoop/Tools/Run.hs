@@ -11,13 +11,15 @@ module Hadoop.Tools.Run
     )
     where
 
-import           Control.Monad.Catch (handle, throwM)
+import           Control.Monad.Catch (handle, throwM, SomeException, fromException)
 
+import           Data.Maybe (catMaybes)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 
 import           System.Exit (exitFailure)
 import           System.IO
+import           System.IO.Error (isDoesNotExistError)
 
 import           Data.Hadoop.Types
 import           Network.Hadoop.Hdfs hiding (runHdfs)
@@ -35,9 +37,13 @@ runHdfs hdfs = do
     run :: HadoopConfig -> IO a
     run cfg = handle (runAgain cfg) (runHdfs' cfg hdfs)
 
-    runAgain :: HadoopConfig -> RemoteError -> IO a
-    runAgain cfg e | isStandbyError e = maybe (throwM e) run (dropNameNode cfg)
-                   | otherwise        = throwM e
+    runAgain :: HadoopConfig -> SomeException -> IO a
+    runAgain cfg e =  do
+        let notExist   = isDoesNotExistError <$> fromException e
+            standbyErr = isStandbyError <$> fromException e
+        if or (catMaybes [notExist, standbyErr])
+        then maybe (throwM e) run (dropNameNode cfg)
+        else throwM e
 
     dropNameNode :: HadoopConfig -> Maybe HadoopConfig
     dropNameNode cfg | null ns   = Nothing
